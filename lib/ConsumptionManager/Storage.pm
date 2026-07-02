@@ -7,6 +7,7 @@ use File::Copy;
 use File::Path qw(make_path);
 use File::Spec;
 use Exporter 'import';
+use ConsumptionManager::Utils qw(cm_timestamp);
 
 our @EXPORT_OK = qw(
     cm_storageCreate
