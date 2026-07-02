@@ -112,7 +112,7 @@ sub cm_storageFilename {
         $storage_dir ||= $hash->{helper}{storageDir} if ref $hash->{helper} eq 'HASH';
     }
 
-    $storage_dir = './log' unless defined $storage_dir && length $storage_dir;
+    $storage_dir = './log/ConsumptionManager' unless defined $storage_dir && length $storage_dir;
     $storage_dir =~ s{[\\/]+$}{};
 
     return File::Spec->catfile($storage_dir, "ConsumptionManager_${device}.json");
@@ -128,14 +128,53 @@ sub cm_storageCreate {
     make_path($dir) unless -d $dir;
 
     my $data = {
-        schema   => 1,
-        device   => $hash->{NAME} || $hash->{name} || '',
-        meter    => {},
-        history  => [],
-        billing  => [],
-        tariffs  => [],
-        settings => {},
-        events   => [],
+        schema => 1,
+
+        meta => {
+            created       => cm_timestamp(),
+            modified      => cm_timestamp(),
+            moduleVersion => '0.1.0',
+        },
+
+        device => {
+            name    => $hash->{NAME},
+            medium  => '',
+            created => cm_timestamp(),
+        },
+
+        meter => {
+            current    => 0,
+            virtual    => 0,
+            offset     => 0,
+            lastUpdate => '',
+        },
+
+        meterChanges => [],
+
+        consumption => {
+            daily   => {},
+            monthly => {},
+            yearly  => {},
+        },
+
+        tariffs => [],
+
+        payments => [],
+
+        billing => {
+            currentCosts => 0,
+            paid         => 0,
+            balance      => 0,
+        },
+
+        statistics => {},
+
+        forecast => {},
+
+        settings => {
+            decimals => 3,
+            currency => 'EUR',
+        },
     };
 
     return cm_storageSave($hash, $data);
@@ -247,7 +286,7 @@ sub cm_storageValidate {
     return 0 unless exists $data->{schema};
     return 0 unless exists $data->{device};
     return 0 unless exists $data->{meter};
-    return 0 unless exists $data->{history};
+    return 0 unless exists $data->{consumption};
     return 0 unless exists $data->{settings};
     return 1;
 }
@@ -256,7 +295,7 @@ sub cm_storageMigrate {
     my ($hash, $data) = @_;
 
     return $data unless defined $data && ref $data eq 'HASH';
-    return $data if defined $data->{schema} && $data->{schema} eq '0.1';
+    return $data if defined $data->{schema} && $data->{schema} >= 1;
     return $data;
 }
 
