@@ -25,7 +25,7 @@ our %EXPORT_TAGS = (
     all => \@EXPORT_OK,
 );
 
-our $VERSION = '1.00';
+our $VERSION = '0.1.0';
 
 =pod
 
@@ -105,6 +105,7 @@ sub cm_storageFilename {
     return undef unless defined $hash;
 
     my $device = $hash->{NAME} || $hash->{name};
+    $device =~ s/[^\w.-]/_/g;
     return undef unless defined $device && length $device;
 
     my $storage_dir = undef;
@@ -222,6 +223,7 @@ sub cm_storageSave {
     my $filename = cm_storageFilename($hash);
     return 0 unless defined $filename;
     return 0 unless defined $data && ref $data eq 'HASH';
+    $data->{meta}{modified} = cm_timestamp();
 
     my $dir = File::Spec->catpath((File::Spec->splitpath($filename))[0,1]);
     make_path($dir) unless -d $dir;
@@ -289,6 +291,12 @@ sub cm_storageValidate {
     return 0 unless exists $data->{meter};
     return 0 unless exists $data->{consumption};
     return 0 unless exists $data->{settings};
+    return 0 unless exists $data->{meterChanges};
+    return 0 unless exists $data->{tariffs};
+    return 0 unless exists $data->{payments};
+    return 0 unless exists $data->{billing};
+    return 0 unless exists $data->{statistics};
+    return 0 unless exists $data->{forecast};
     return 1;
 }
 
