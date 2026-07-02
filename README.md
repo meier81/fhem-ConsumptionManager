@@ -1,2 +1,5 @@
-# fhem-ConsumptionManager
-Universal FHEM module for electricity, gas and water consumption, costs, billing periods and statistics.
+# FHEM ConsumptionManager
+
+Projektbeschreibung:
+
+Ein neues FHEM-Modul zur Verwaltung von Strom-, Gas- und Wasserzählern.
