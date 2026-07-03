@@ -214,6 +214,15 @@ sub cm_storageLoad {
         return undef;
     }
 
+    # JSON-Struktur prüfen
+    unless (cm_storageValidate($hash, $data)) {
+        warn "Invalid storage structure in '$filename'";
+        return undef;
+    }
+
+    # Schema ggf. migrieren
+    $data = cm_storageMigrate($hash, $data);
+
     return $data;
 }
 
