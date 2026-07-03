@@ -71,6 +71,10 @@ sub cm_coreSetCounter {
     return 0 unless $data;
 
     $value += 0;
+
+    $data->{meter}{previous} = $data->{meter}{current}
+        if defined $data->{meter}{current};
+
     $data->{meter}{current} = $value;
     $data->{meter}{lastUpdate} = cm_timestamp();
 
