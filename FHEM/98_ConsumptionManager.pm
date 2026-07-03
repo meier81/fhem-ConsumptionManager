@@ -18,6 +18,10 @@ use ConsumptionManager::Core qw(
     cm_coreSetCounter
 );
 
+use ConsumptionManager::Storage qw(
+    cm_storageCreate
+);
+
 our $VERSION = '0.1.0';
 
 #####################################
