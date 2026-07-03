@@ -20,7 +20,7 @@ our %EXPORT_TAGS = (
     all => \@EXPORT_OK,
 );
 
-our $VERSION = '1.00';
+our $VERSION = '0.1.0';
 
 =pod
 

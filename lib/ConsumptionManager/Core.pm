@@ -2,8 +2,9 @@ package ConsumptionManager::Core;
 
 use strict;
 use warnings;
-
 use Exporter 'import';
+use ConsumptionManager::Storage qw(cm_storageLoad cm_storageSave cm_storageCreate);
+use ConsumptionManager::Utils qw(cm_timestamp);
 
 our @EXPORT_OK = qw(
     cm_coreInitialize
@@ -11,6 +12,18 @@ our @EXPORT_OK = qw(
     cm_coreSave
     cm_coreSetCounter
 );
+
+our $VERSION = '0.1.0';
+
+=head1 NAME
+
+ConsumptionManager::Core
+
+=head1 DESCRIPTION
+
+Core functions of the ConsumptionManager.
+
+=cut
 
 sub cm_coreInitialize {
     my ($hash) = @_;
@@ -25,7 +38,7 @@ sub cm_coreInitialize {
 sub cm_coreLoad {
     my ($hash) = @_;
 
-    return undef unless defined $hash;
+    return unless defined $hash;
 
     my $data = cm_storageLoad($hash);
 
@@ -46,6 +59,7 @@ sub cm_coreSetCounter {
 
     return 0 unless defined $hash;
     return 0 unless defined $value;
+    return 0 unless $value =~ /^\d+(?:\.\d+)?$/;
 
     my $data = cm_storageLoad($hash);
 
@@ -56,6 +70,7 @@ sub cm_coreSetCounter {
 
     return 0 unless $data;
 
+    $value += 0;
     $data->{meter}{current} = $value;
     $data->{meter}{lastUpdate} = cm_timestamp();
 
