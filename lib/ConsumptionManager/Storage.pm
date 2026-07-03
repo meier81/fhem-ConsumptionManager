@@ -232,6 +232,7 @@ sub cm_storageSave {
     my $filename = cm_storageFilename($hash);
     return 0 unless defined $filename;
     return 0 unless defined $data && ref $data eq 'HASH';
+    $data->{meta} ||= {};
     $data->{meta}{modified} = cm_timestamp();
 
     my $dir = File::Spec->catpath((File::Spec->splitpath($filename))[0,1]);
@@ -296,16 +297,16 @@ sub cm_storageValidate {
 
     return 0 unless defined $data && ref $data eq 'HASH';
     return 0 unless exists $data->{schema};
-    return 0 unless exists $data->{device};
-    return 0 unless exists $data->{meter};
-    return 0 unless exists $data->{consumption};
-    return 0 unless exists $data->{settings};
-    return 0 unless exists $data->{meterChanges};
-    return 0 unless exists $data->{tariffs};
-    return 0 unless exists $data->{payments};
-    return 0 unless exists $data->{billing};
-    return 0 unless exists $data->{statistics};
-    return 0 unless exists $data->{forecast};
+    return 0 unless ref $data->{device}        eq 'HASH';
+    return 0 unless ref $data->{meter}         eq 'HASH';
+    return 0 unless ref $data->{consumption}   eq 'HASH';
+    return 0 unless ref $data->{meterChanges}  eq 'ARRAY';
+    return 0 unless ref $data->{tariffs}       eq 'ARRAY';
+    return 0 unless ref $data->{payments}      eq 'ARRAY';
+    return 0 unless ref $data->{billing}       eq 'HASH';
+    return 0 unless ref $data->{statistics}    eq 'HASH';
+    return 0 unless ref $data->{forecast}      eq 'HASH';
+    return 0 unless ref $data->{settings}      eq 'HASH';
     return 1;
 }
 
