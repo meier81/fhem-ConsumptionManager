@@ -64,7 +64,7 @@ sub cm_coreSetCounter {
     my $data = cm_storageLoad($hash);
 
     unless ($data) {
-        cm_storageCreate($hash);
+        return 0 unless cm_storageCreate($hash);
         $data = cm_storageLoad($hash);
     }
 
