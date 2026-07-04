@@ -13,7 +13,7 @@ our @EXPORT_OK = qw(
 );
 
 use constant CM_SCHEMA_VERSION   => 1;
-use constant CM_VERSION          => '0.1.0';
+use constant CM_VERSION          => '0.2.0';
 
 use constant CM_DEFAULT_DECIMALS => 3;
 use constant CM_DEFAULT_CURRENCY => 'EUR';

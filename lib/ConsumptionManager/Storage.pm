@@ -166,12 +166,17 @@ sub cm_storageCreate {
         meterChanges => [],
 
         consumption => {
-            daily   => {},
+            lastDayKey   => '',
+            lastMonthKey => '',
+            lastYearKey  => '',
+            
             yesterday => 0,
+            lastMonthValue => 0,
+            lastYearValue  => 0,
+
+            daily   => {},
             monthly => {},
-            lastMonth => 0,
             yearly  => {},
-            lastYear => 0,
         },
 
         tariffs => [],
