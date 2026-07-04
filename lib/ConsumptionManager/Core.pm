@@ -5,6 +5,7 @@ use warnings;
 use Exporter 'import';
 use ConsumptionManager::Storage qw(cm_storageLoad cm_storageSave cm_storageCreate);
 use ConsumptionManager::Utils qw(cm_timestamp);
+use ConsumptionManager::Meter qw(cm_meterUpdate);
 
 our @EXPORT_OK = qw(
     cm_coreInitialize
@@ -95,13 +96,11 @@ sub cm_coreSetCounter {
 
     return 0 unless $data;
 
-    $value += 0;
-
-    $data->{meter}{previous} = $data->{meter}{current}
-        if defined $data->{meter}{current};
-
-    $data->{meter}{current} = $value;
-    $data->{meter}{lastUpdate} = cm_timestamp();
+    return 0 unless cm_meterUpdate(
+        $hash,
+        $data,
+        $value
+    );
 
     return cm_storageSave($hash, $data);
 }
