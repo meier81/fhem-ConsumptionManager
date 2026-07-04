@@ -10,8 +10,7 @@ package main;
 
 use strict;
 use warnings;
-use ConsumptionManager::Core qw(cm_coreInitialize cm_coreInitializeDevice cm_coreLoad cm_coreSetCounter);
-use ConsumptionManager::Utils qw(cm_dateKeys);
+use ConsumptionManager::Core qw(cm_coreInitialize cm_coreInitializeDevice cm_coreLoad cm_coreSetCounter cm_coreResetPower);
 use ConsumptionManager::Consumption qw(cm_consumptionToday cm_consumptionMonth cm_consumptionYear);
 
 our $VERSION = '0.1.0';
@@ -188,8 +187,6 @@ sub ConsumptionManager_UpdateReadings {
             $data->{meter}{powerCurrent}
         );
     }
-
-    my ($day, $month, $yearKey) = cm_dateKeys();
 
     readingsBulkUpdate(
         $hash,

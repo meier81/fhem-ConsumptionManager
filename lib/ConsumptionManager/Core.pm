@@ -13,6 +13,7 @@ our @EXPORT_OK = qw(
     cm_coreLoad
     cm_coreSave
     cm_coreSetCounter
+    cm_coreResetPower
 );
 
 our $VERSION = '0.1.0';
@@ -101,6 +102,26 @@ sub cm_coreSetCounter {
         $data,
         $value
     );
+
+    return cm_storageSave($hash, $data);
+}
+
+###############################################################################
+# Reset current power to zero
+###############################################################################
+
+sub cm_coreResetPower {
+    my ($hash) = @_;
+
+    return 0 unless defined $hash;
+
+    my $data = cm_storageLoad($hash);
+
+    return 0 unless $data;
+
+    return 1 if ($data->{meter}{powerCurrent} == 0);
+
+    $data->{meter}{powerCurrent} = 0;
 
     return cm_storageSave($hash, $data);
 }

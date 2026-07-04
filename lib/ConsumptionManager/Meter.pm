@@ -85,25 +85,45 @@ sub cm_meterUpdate {
 
     my $now = cm_now();
 
-    my $timeDiff = $now - ($data->{meter}{lastTimestamp} || $now);
+    my $lastTimestamp = $data->{meter}{lastTimestamp} // $now;
 
-    $timeDiff = 1 if ($timeDiff < 1);
+    my $timeDiff = $now - $lastTimestamp;
 
     my $consumption = cm_meterConsumption(
         $oldCounter,
         $newCounter
     );
 
-    my $power = ($consumption * 3600) / $timeDiff;
+    ###########################################################################
+    # Plausibilitätsprüfung
+    ###########################################################################
+
+    return 0 if ($consumption < 0);
+
+    ###########################################################################
+    # Aktuelle Leistung berechnen
+    ###########################################################################
+
+    my $power = 0;
+
+    if ($timeDiff > 0) {
+         $power = ($consumption * 3600) / $timeDiff;
+    }
 
     $data->{meter}{previous}        = $oldCounter;
     $data->{meter}{current}         = $newCounter;
     $data->{meter}{lastConsumption} = $consumption;
-    $data->{meter}{powerCurrent}    = sprintf("%.2f", $power);
+    $data->{meter}{powerCurrent}    = 0 + sprintf("%.2f", $power);
     $data->{meter}{lastTimestamp}   = $now;
     $data->{meter}{lastUpdate}      = cm_timestamp();
 
-    cm_consumptionUpdate($hash, $data, $oldCounter, $newCounter, $consumption);
+    cm_consumptionUpdate(
+        $hash,
+        $data,
+        $oldCounter,
+        $newCounter,
+        $consumption
+    );
 
     return 1;
 }
