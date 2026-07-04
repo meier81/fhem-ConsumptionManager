@@ -10,23 +10,9 @@ package main;
 
 use strict;
 use warnings;
-
-use ConsumptionManager::Core qw(
-    cm_coreInitialize
-    cm_coreInitializeDevice
-    cm_coreLoad
-    cm_coreSetCounter
-);
-
-use ConsumptionManager::Utils qw(
-    cm_dateKeys
-);
-
-use ConsumptionManager::Consumption qw(
-    cm_consumptionToday
-    cm_consumptionMonth
-    cm_consumptionYear
-);
+use ConsumptionManager::Core qw(cm_coreInitialize cm_coreInitializeDevice cm_coreLoad cm_coreSetCounter);
+use ConsumptionManager::Utils qw(cm_dateKeys);
+use ConsumptionManager::Consumption qw(cm_consumptionToday cm_consumptionMonth cm_consumptionYear);
 
 our $VERSION = '0.1.0';
 
@@ -47,6 +33,7 @@ sub ConsumptionManager_Initialize($)
         . ' group'
         . ' IODev'
         . ' disable:0,1'
+        . ' powerTimeout'
         . ' '.$readingFnAttributes;
 }
 
@@ -109,6 +96,21 @@ sub ConsumptionManager_Set($@)
             unless ($result);
 
         ConsumptionManager_UpdateReadings($hash);
+
+        RemoveInternalTimer($hash);
+
+        my $timeout = AttrVal(
+            $hash->{NAME},
+            "powerTimeout",
+            300
+        );
+
+        InternalTimer(
+            gettimeofday() + $timeout,
+            "ConsumptionManager_PowerTimeout",
+            $hash,
+            0
+        );
 
         return undef;
     }
@@ -179,6 +181,14 @@ sub ConsumptionManager_UpdateReadings {
         );
     }
 
+    if (defined $data->{meter}{powerCurrent}) {
+        readingsBulkUpdate(
+            $hash,
+            "powerCurrent",
+            $data->{meter}{powerCurrent}
+        );
+    }
+
     my ($day, $month, $yearKey) = cm_dateKeys();
 
     readingsBulkUpdate(
@@ -223,6 +233,23 @@ sub ConsumptionManager_UpdateReadings {
     }
 
     readingsEndUpdate($hash, 1);
+
+    return;
+}
+
+###############################################################################
+sub ConsumptionManager_PowerTimeout {
+
+    my ($hash) = @_;
+
+    cm_coreResetPower($hash);
+
+    readingsSingleUpdate(
+        $hash,
+        "powerCurrent",
+        0,
+        1
+    );
 
     return;
 }

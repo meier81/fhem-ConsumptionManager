@@ -3,7 +3,7 @@ package ConsumptionManager::Meter;
 use strict;
 use warnings;
 use Exporter 'import';
-use ConsumptionManager::Utils qw(cm_timestamp);
+use ConsumptionManager::Utils qw(cm_timestamp cm_now);
 use ConsumptionManager::Consumption qw(cm_consumptionUpdate);
 
 our @EXPORT_OK = qw(
@@ -70,8 +70,9 @@ sub cm_meterUpdate {
 
     unless (defined $data->{meter}{current}) {
 
-        $data->{meter}{current}    = $newCounter;
-        $data->{meter}{lastUpdate} = cm_timestamp();
+        $data->{meter}{current}       = $newCounter;
+        $data->{meter}{lastTimestamp} = cm_now();
+        $data->{meter}{lastUpdate}    = cm_timestamp();
 
         return 1;
     }
@@ -82,14 +83,24 @@ sub cm_meterUpdate {
 
     my $oldCounter = $data->{meter}{current};
 
+    my $now = cm_now();
+
+    my $timeDiff = $now - ($data->{meter}{lastTimestamp} || $now);
+
+    $timeDiff = 1 if ($timeDiff < 1);
+
     my $consumption = cm_meterConsumption(
         $oldCounter,
         $newCounter
     );
 
+    my $power = ($consumption * 3600) / $timeDiff;
+
     $data->{meter}{previous}        = $oldCounter;
     $data->{meter}{current}         = $newCounter;
     $data->{meter}{lastConsumption} = $consumption;
+    $data->{meter}{powerCurrent}    = sprintf("%.2f", $power);
+    $data->{meter}{lastTimestamp}   = $now;
     $data->{meter}{lastUpdate}      = cm_timestamp();
 
     cm_consumptionUpdate($hash, $data, $oldCounter, $newCounter, $consumption);

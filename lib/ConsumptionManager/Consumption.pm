@@ -2,12 +2,8 @@ package ConsumptionManager::Consumption;
 
 use strict;
 use warnings;
-
 use Exporter 'import';
-
-use ConsumptionManager::Utils qw(
-    cm_dateKeys
-);
+use ConsumptionManager::Utils qw(cm_dateKeys);
 
 our @EXPORT_OK = qw(
     cm_consumptionUpdate

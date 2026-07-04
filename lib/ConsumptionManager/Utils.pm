@@ -10,6 +10,7 @@ our @EXPORT_OK = qw(
     cm_round
     cm_timestamp
     cm_dateKeys
+    cm_now
     cm_today
     cm_month
     cm_year
@@ -173,6 +174,15 @@ sub cm_dateKeys {
     );
 
     return ($day, $month, $yearKey);
+}
+
+###############################################################################
+# Return current unix timestamp
+###############################################################################
+
+sub cm_now {
+
+    return time();
 }
 
 sub cm_today {
