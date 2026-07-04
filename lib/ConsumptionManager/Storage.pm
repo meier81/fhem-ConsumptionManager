@@ -167,8 +167,11 @@ sub cm_storageCreate {
 
         consumption => {
             daily   => {},
+            yesterday => 0,
             monthly => {},
+            lastMonth => 0,
             yearly  => {},
+            lastYear => 0,
         },
 
         tariffs => [],
