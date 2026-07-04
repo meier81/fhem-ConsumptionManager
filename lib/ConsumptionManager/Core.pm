@@ -3,9 +3,24 @@ package ConsumptionManager::Core;
 use strict;
 use warnings;
 use Exporter 'import';
-use ConsumptionManager::Storage qw(cm_storageLoad cm_storageSave cm_storageCreate);
-use ConsumptionManager::Utils qw(cm_timestamp);
-use ConsumptionManager::Meter qw(cm_meterUpdate);
+
+use ConsumptionManager::Constants qw(
+    CM_VERSION
+);
+
+use ConsumptionManager::Storage qw(
+    cm_storageLoad
+    cm_storageSave
+    cm_storageCreate
+);
+
+use ConsumptionManager::Utils qw(
+    cm_timestamp
+);
+
+use ConsumptionManager::Meter qw(
+    cm_meterUpdate
+);
 
 our @EXPORT_OK = qw(
     cm_coreInitialize
@@ -16,7 +31,7 @@ our @EXPORT_OK = qw(
     cm_coreResetPower
 );
 
-our $VERSION = '0.1.0';
+our $VERSION = CM_VERSION;
 
 =head1 NAME
 

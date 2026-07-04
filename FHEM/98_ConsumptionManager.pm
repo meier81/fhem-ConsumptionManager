@@ -10,10 +10,27 @@ package main;
 
 use strict;
 use warnings;
-use ConsumptionManager::Core qw(cm_coreInitialize cm_coreInitializeDevice cm_coreLoad cm_coreSetCounter cm_coreResetPower);
-use ConsumptionManager::Consumption qw(cm_consumptionToday cm_consumptionMonth cm_consumptionYear);
 
-our $VERSION = '0.1.0';
+use ConsumptionManager::Constants qw(
+    CM_VERSION
+    CM_DEFAULT_POWER_TIMEOUT
+);
+
+use ConsumptionManager::Core qw(
+    cm_coreInitialize
+    cm_coreInitializeDevice
+    cm_coreLoad
+    cm_coreSetCounter
+    cm_coreResetPower
+);
+
+use ConsumptionManager::Consumption qw(
+    cm_consumptionToday
+    cm_consumptionMonth
+    cm_consumptionYear
+);
+
+our $VERSION = CM_VERSION;
 
 #####################################
 sub ConsumptionManager_Initialize($)
@@ -101,7 +118,7 @@ sub ConsumptionManager_Set($@)
         my $timeout = AttrVal(
             $hash->{NAME},
             "powerTimeout",
-            300
+            CM_DEFAULT_POWER_TIMEOUT
         );
 
         InternalTimer(

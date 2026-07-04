@@ -3,7 +3,14 @@ package ConsumptionManager::Consumption;
 use strict;
 use warnings;
 use Exporter 'import';
-use ConsumptionManager::Utils qw(cm_dateKeys);
+
+use ConsumptionManager::Constants qw(
+    CM_VERSION
+);
+
+use ConsumptionManager::Utils qw(
+    cm_dateKeys
+);
 
 our @EXPORT_OK = qw(
     cm_consumptionUpdate
@@ -12,7 +19,7 @@ our @EXPORT_OK = qw(
     cm_consumptionYear
 );
 
-our $VERSION = '0.1.0';
+our $VERSION = CM_VERSION;
 
 =head1 NAME
 

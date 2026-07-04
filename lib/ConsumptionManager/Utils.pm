@@ -4,6 +4,10 @@ use strict;
 use warnings;
 use Exporter 'import';
 
+use ConsumptionManager::Constants qw(
+    CM_VERSION
+);
+
 our @EXPORT_OK = qw(
     cm_log
     cm_debug
@@ -22,7 +26,7 @@ our %EXPORT_TAGS = (
     all => \@EXPORT_OK,
 );
 
-our $VERSION = '0.1.0';
+our $VERSION = CM_VERSION;
 
 =pod
 

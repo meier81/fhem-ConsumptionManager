@@ -3,8 +3,19 @@ package ConsumptionManager::Meter;
 use strict;
 use warnings;
 use Exporter 'import';
-use ConsumptionManager::Utils qw(cm_timestamp cm_now);
-use ConsumptionManager::Consumption qw(cm_consumptionUpdate);
+
+use ConsumptionManager::Constants qw(
+    CM_VERSION
+);
+
+use ConsumptionManager::Utils qw(
+    cm_timestamp
+    cm_now
+);
+
+use ConsumptionManager::Consumption qw(
+    cm_consumptionUpdate
+);
 
 our @EXPORT_OK = qw(
     cm_meterUpdate
@@ -12,7 +23,7 @@ our @EXPORT_OK = qw(
     cm_meterValidate
 );
 
-our $VERSION = '0.1.0';
+our $VERSION = CM_VERSION;
 
 =head1 NAME
 

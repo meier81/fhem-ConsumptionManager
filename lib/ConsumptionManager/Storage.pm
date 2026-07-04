@@ -7,7 +7,15 @@ use File::Copy;
 use File::Path qw(make_path);
 use File::Spec;
 use Exporter 'import';
-use ConsumptionManager::Utils qw(cm_timestamp);
+
+use ConsumptionManager::Constants qw(
+    CM_VERSION
+    CM_SCHEMA_VERSION
+);
+
+use ConsumptionManager::Utils qw(
+    cm_timestamp
+);
 
 our @EXPORT_OK = qw(
     cm_storageCreate
@@ -25,7 +33,7 @@ our %EXPORT_TAGS = (
     all => \@EXPORT_OK,
 );
 
-our $VERSION = '0.1.0';
+our $VERSION = CM_VERSION;
 
 =pod
 
@@ -130,12 +138,12 @@ sub cm_storageCreate {
     make_path($dir) unless -d $dir;
 
     my $data = {
-        schema => 1,
+        schema => CM_SCHEMA_VERSION,
 
         meta => {
             created       => cm_timestamp(),
             modified      => cm_timestamp(),
-            moduleVersion => '0.1.0',
+            moduleVersion => CM_VERSION,
         },
 
         device => {
