@@ -2,8 +2,8 @@ package ConsumptionManager::Consumption;
 
 use strict;
 use warnings;
-
 use Exporter 'import';
+use ConsumptionManager::Utils qw(cm_dateKeys);
 
 our @EXPORT_OK = qw(
     cm_consumptionUpdate
@@ -26,25 +26,13 @@ Consumption calculations.
 ###############################################################################
 
 sub cm_consumptionUpdate {
-    my ($hash, $data, $consumption) = @_;
+    my ($hash, $data, $oldCounter, $newCounter, $consumption) = @_;
 
     return 0 unless defined $hash;
     return 0 unless defined $data;
     return 0 unless defined $consumption;
 
-    my ($sec,$min,$hour,$mday,$mon,$year) = localtime();
-
-    my $day   = sprintf("%04d-%02d-%02d",
-                    $year+1900,
-                    $mon+1,
-                    $mday);
-
-    my $month = sprintf("%04d-%02d",
-                    $year+1900,
-                    $mon+1);
-
-    my $yearKey = sprintf("%04d",
-                    $year+1900);
+    my ($day, $month, $yearKey) = cm_dateKeys();
 
     $data->{consumption}{daily}{$day} += $consumption;
 

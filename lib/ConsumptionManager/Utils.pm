@@ -9,6 +9,7 @@ our @EXPORT_OK = qw(
     cm_debug
     cm_round
     cm_timestamp
+    cm_dateKeys
     cm_today
     cm_month
     cm_year
@@ -143,6 +144,35 @@ sub cm_timestamp {
         $lt[1],
         $lt[0],
     );
+}
+
+###############################################################################
+# Return current date keys
+###############################################################################
+
+sub cm_dateKeys {
+
+    my ($sec, $min, $hour, $mday, $mon, $year) = localtime();
+
+    my $day = sprintf(
+        "%04d-%02d-%02d",
+        $year + 1900,
+        $mon + 1,
+        $mday
+    );
+
+    my $month = sprintf(
+        "%04d-%02d",
+        $year + 1900,
+        $mon + 1
+    );
+
+    my $yearKey = sprintf(
+        "%04d",
+        $year + 1900
+    );
+
+    return ($day, $month, $yearKey);
 }
 
 sub cm_today {

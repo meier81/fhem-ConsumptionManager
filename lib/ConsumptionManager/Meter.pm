@@ -2,12 +2,9 @@ package ConsumptionManager::Meter;
 
 use strict;
 use warnings;
-
 use Exporter 'import';
-
-use ConsumptionManager::Utils qw(
-    cm_timestamp
-);
+use ConsumptionManager::Utils qw(cm_timestamp);
+use ConsumptionManager::Consumption qw(cm_consumptionUpdate);
 
 our @EXPORT_OK = qw(
     cm_meterUpdate
@@ -67,10 +64,23 @@ sub cm_meterUpdate {
 
     $newCounter += 0;
 
-    my $oldCounter = $data->{meter}{current};
+    ###########################################################################
+    # Erster Zählerstand
+    ###########################################################################
 
-    $oldCounter = 0
-        unless defined $oldCounter;
+    unless (defined $data->{meter}{current}) {
+
+        $data->{meter}{current}    = $newCounter;
+        $data->{meter}{lastUpdate} = cm_timestamp();
+
+        return 1;
+    }
+
+    ###########################################################################
+    # Verbrauch berechnen
+    ###########################################################################
+
+    my $oldCounter = $data->{meter}{current};
 
     my $consumption = cm_meterConsumption(
         $oldCounter,
@@ -81,6 +91,8 @@ sub cm_meterUpdate {
     $data->{meter}{current}         = $newCounter;
     $data->{meter}{lastConsumption} = $consumption;
     $data->{meter}{lastUpdate}      = cm_timestamp();
+
+    cm_consumptionUpdate($hash, $data, $oldCounter, $newCounter, $consumption);
 
     return 1;
 }

@@ -19,6 +19,10 @@ use ConsumptionManager::Core qw(
     cm_coreSetCounter
 );
 
+use ConsumptionManager::Utils qw(
+    cm_dateKeys
+);
+
 our $VERSION = '0.1.0';
 
 #####################################
@@ -61,8 +65,9 @@ sub ConsumptionManager_Define($$)
     cm_coreInitialize($hash);
     cm_coreInitializeDevice($hash, $medium);
 
-    readingsSingleUpdate($hash, "state", "initialized", 1);
     readingsSingleUpdate($hash, "medium", $medium, 1);
+
+    ConsumptionManager_UpdateReadings($hash);
 
     return undef;
 }
@@ -100,8 +105,7 @@ sub ConsumptionManager_Set($@)
         return "Unable to save counter"
             unless ($result);
 
-        readingsSingleUpdate($hash, "counter", $value, 1);
-        readingsSingleUpdate($hash, "state", "active", 1);
+        ConsumptionManager_UpdateReadings($hash);
 
         return undef;
     }
@@ -136,6 +140,71 @@ sub ConsumptionManager_Get($@)
 sub ConsumptionManager_Attr(@)
 {
     return undef;
+}
+
+###############################################################################
+sub ConsumptionManager_UpdateReadings {
+    my ($hash) = @_;
+
+    my $data = cm_coreLoad($hash);
+
+    return unless $data;
+
+    readingsBeginUpdate($hash);
+
+    if (defined $data->{meter}{current}) {
+        readingsBulkUpdate(
+            $hash,
+            "counter",
+            $data->{meter}{current}
+        );
+    }
+
+    if (defined $data->{meter}{lastConsumption}) {
+        readingsBulkUpdate(
+            $hash,
+            "consumptionLast",
+            $data->{meter}{lastConsumption}
+        );
+    }
+
+    my ($day, $month, $yearKey) = cm_dateKeys();
+
+    readingsBulkUpdate(
+        $hash,
+        "consumptionToday",
+        $data->{consumption}{daily}{$day} // 0
+    );
+
+    readingsBulkUpdate(
+        $hash,
+        "consumptionMonth",
+        $data->{consumption}{monthly}{$month} // 0
+    );
+
+    readingsBulkUpdate(
+        $hash,
+        "consumptionYear",
+        $data->{consumption}{yearly}{$yearKey} // 0
+    );
+
+    if (defined $data->{meter}{lastUpdate}) {
+        readingsBulkUpdate(
+            $hash,
+            "lastUpdate",
+            $data->{meter}{lastUpdate}
+        );
+    }
+
+    readingsBulkUpdate(
+        $hash,
+        "state",
+        "active"
+    );
+
+    readingsEndUpdate($hash, 1);
+
+    return;
 }
 
 1;
