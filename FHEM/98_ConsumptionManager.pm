@@ -22,6 +22,12 @@ use ConsumptionManager::Utils qw(
     cm_dateKeys
 );
 
+use ConsumptionManager::Consumption qw(
+    cm_consumptionToday
+    cm_consumptionMonth
+    cm_consumptionYear
+);
+
 our $VERSION = '0.1.0';
 
 #####################################
@@ -178,19 +184,19 @@ sub ConsumptionManager_UpdateReadings {
     readingsBulkUpdate(
         $hash,
         "consumptionToday",
-        $data->{consumption}{daily}{$day} // 0
+        cm_consumptionToday($data)
     );
 
     readingsBulkUpdate(
         $hash,
         "consumptionMonth",
-        $data->{consumption}{monthly}{$month} // 0
+        cm_consumptionMonth($data)
     );
 
     readingsBulkUpdate(
         $hash,
         "consumptionYear",
-        $data->{consumption}{yearly}{$yearKey} // 0
+        cm_consumptionYear($data)
     );
 
     if (defined $data->{meter}{lastUpdate}) {

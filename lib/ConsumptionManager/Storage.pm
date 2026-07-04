@@ -145,10 +145,12 @@ sub cm_storageCreate {
         },
 
         meter => {
-            current    => 0,
-            virtual    => 0,
-            offset     => 0,
-            lastUpdate => '',
+            current         => undef,
+            previous        => undef,
+            virtual         => 0,
+            offset          => 0,
+            lastConsumption => undef,
+            lastUpdate      => '',
         },
 
         meterChanges => [],
