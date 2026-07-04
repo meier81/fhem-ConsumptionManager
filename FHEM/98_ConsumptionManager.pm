@@ -13,13 +13,10 @@ use warnings;
 
 use ConsumptionManager::Core qw(
     cm_coreInitialize
+    cm_coreInitializeDevice
     cm_coreLoad
     cm_coreSave
     cm_coreSetCounter
-);
-
-use ConsumptionManager::Storage qw(
-    cm_storageCreate
 );
 
 our $VERSION = '0.1.0';
@@ -62,19 +59,7 @@ sub ConsumptionManager_Define($$)
     $hash->{MEDIUM} = $medium;
 
     cm_coreInitialize($hash);
-
-    # JSON-Datei anlegen, falls sie noch nicht existiert
-    my $data = cm_coreLoad($hash);
-
-    unless ($data) {
-        cm_storageCreate($hash);
-        $data = cm_coreLoad($hash);
-    }
-
-    if ($data) {
-        $data->{device}{medium} = $medium;
-        cm_coreSave($hash, $data);
-    }
+    cm_coreInitializeDevice($hash, $medium);
 
     readingsSingleUpdate($hash, "state", "initialized", 1);
     readingsSingleUpdate($hash, "medium", $medium, 1);

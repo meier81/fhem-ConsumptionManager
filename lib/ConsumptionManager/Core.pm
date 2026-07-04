@@ -8,6 +8,7 @@ use ConsumptionManager::Utils qw(cm_timestamp);
 
 our @EXPORT_OK = qw(
     cm_coreInitialize
+    cm_coreInitializeDevice
     cm_coreLoad
     cm_coreSave
     cm_coreSetCounter
@@ -33,6 +34,35 @@ sub cm_coreInitialize {
     $hash->{helper}{cm} ||= {};
 
     return 1;
+}
+
+sub cm_coreInitializeDevice {
+    my ($hash, $medium) = @_;
+
+    return unless defined $hash;
+
+    my $data = cm_storageLoad($hash);
+
+    unless ($data) {
+        return undef unless cm_storageCreate($hash);
+        $data = cm_storageLoad($hash);
+    }
+
+    return undef unless $data;
+
+    $data->{device}{name} = $hash->{NAME};
+
+    if (defined $medium) {
+        $data->{device}{medium} = $medium;
+    }
+
+    if (!$data->{device}{created}) {
+        $data->{device}{created} = cm_timestamp();
+    }
+
+    return undef unless cm_storageSave($hash, $data);
+
+    return $data;
 }
 
 sub cm_coreLoad {
@@ -61,12 +91,7 @@ sub cm_coreSetCounter {
     return 0 unless defined $value;
     return 0 unless $value =~ /^\d+(?:\.\d+)?$/;
 
-    my $data = cm_storageLoad($hash);
-
-    unless ($data) {
-        return 0 unless cm_storageCreate($hash);
-        $data = cm_storageLoad($hash);
-    }
+    my $data = cm_coreInitializeDevice($hash);
 
     return 0 unless $data;
 
