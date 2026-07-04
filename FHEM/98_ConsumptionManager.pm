@@ -15,7 +15,6 @@ use ConsumptionManager::Core qw(
     cm_coreInitialize
     cm_coreInitializeDevice
     cm_coreLoad
-    cm_coreSave
     cm_coreSetCounter
 );
 
@@ -64,8 +63,6 @@ sub ConsumptionManager_Define($$)
 
     cm_coreInitialize($hash);
     cm_coreInitializeDevice($hash, $medium);
-
-    readingsSingleUpdate($hash, "medium", $medium, 1);
 
     ConsumptionManager_UpdateReadings($hash);
 
@@ -152,6 +149,14 @@ sub ConsumptionManager_UpdateReadings {
 
     readingsBeginUpdate($hash);
 
+    if (defined $data->{device}{medium}) {
+        readingsBulkUpdate(
+            $hash,
+            "medium",
+            $data->{device}{medium}
+        );
+    }
+
     if (defined $data->{meter}{current}) {
         readingsBulkUpdate(
             $hash,
@@ -196,11 +201,20 @@ sub ConsumptionManager_UpdateReadings {
         );
     }
 
-    readingsBulkUpdate(
-        $hash,
-        "state",
-        "active"
-    );
+    if (defined $data->{meter}{current}) {
+        readingsBulkUpdate(
+            $hash,
+            "state",
+            "active"
+        );
+    }
+    else {
+        readingsBulkUpdate(
+            $hash,
+            "state",
+            "initialized"
+        );
+    }
 
     readingsEndUpdate($hash, 1);
 
