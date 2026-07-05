@@ -170,7 +170,7 @@ sub cm_storageCreate {
             lastMonthKey => '',
             lastYearKey  => '',
             
-            yesterday => 0,
+            yesterday      => 0,
             lastMonthValue => 0,
             lastYearValue  => 0,
 

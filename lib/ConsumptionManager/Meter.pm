@@ -131,8 +131,6 @@ sub cm_meterUpdate {
     cm_consumptionUpdate(
         $hash,
         $data,
-        $oldCounter,
-        $newCounter,
         $consumption
     );
 
