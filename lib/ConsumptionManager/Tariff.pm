@@ -10,6 +10,8 @@ use ConsumptionManager::Constants qw(
 
 use ConsumptionManager::Utils qw(
     cm_today
+    cm_dateCompare
+    cm_dateSubtractDay
 );
 
 our @EXPORT_OK = qw(
@@ -327,3 +329,172 @@ sub cm_tariffCreate {
 
     return 1;
 }
+
+###############################################################################
+# Set value in tariff editor
+###############################################################################
+
+sub cm_tariffSetValue {
+
+    my ($data, $field, $value) = @_;
+
+    return 0 unless defined $data;
+    return 0 unless ref($data) eq 'HASH';
+    return 0 unless exists $data->{tariffEditor};
+
+    my $editor = $data->{tariffEditor};
+
+    #
+    # erlaubte Felder
+    #
+
+    my %allowed = map { $_ => 1 } qw(
+        validFrom
+        validTo
+        workPrice
+        basePrice
+        basePriceUnit
+        currency
+        unitCounter
+        unitBilling
+        calorificValue
+        stateNumber
+        comment
+    );
+
+    return 0 unless exists $allowed{$field};
+
+    #
+    # Validierung
+    #
+
+    if ($field =~ /^(workPrice|basePrice|calorificValue|stateNumber)$/) {
+
+        return 0
+            unless defined $value
+            && $value =~ /^\d+(?:\.\d+)?$/;
+
+        $value += 0;
+    }
+
+    elsif ($field eq "validFrom" || $field eq "validTo") {
+
+        return 0
+            unless defined $value
+            && $value =~ /^\d{4}-\d{2}-\d{2}$/;
+    }
+
+    elsif ($field eq "basePriceUnit") {
+
+        return 0
+            unless $value =~ /^(day|month|year)$/;
+    }
+
+    elsif ($field eq "currency") {
+
+        return 0
+            unless $value =~ /^[A-Z]{3}$/;
+    }
+
+    elsif ($field eq "unitCounter"
+        || $field eq "unitBilling") {
+
+        return 0
+            unless $value =~ /^(kWh|Wh|m3|L)$/;
+    }
+
+    #
+    # übernehmen
+    #
+
+    $editor->{$field} = $value;
+
+    return 1;
+}
+
+###############################################################################
+# Save tariff editor
+###############################################################################
+
+sub cm_tariffSave {
+
+    my ($data) = @_;
+
+    return 0 unless defined $data;
+    return 0 unless ref($data) eq 'HASH';
+
+    my $editor = $data->{tariffEditor};
+
+    return 0 unless defined $editor;
+    return 0 unless ref($editor) eq 'HASH';
+
+    #
+    # Vollständigen Tarif prüfen
+    #
+
+    return 0 unless cm_tariffValidate($editor);
+
+    #
+    # Aktuellen Tarif ermitteln
+    #
+
+    my $current = cm_tariffCurrent($data);
+
+    if (defined $current) {
+
+        #
+        # Neuer Tarif muss nach dem bisherigen beginnen
+        #
+
+        if (
+               defined $current->{validFrom}
+            && cm_dateCompare(
+                $editor->{validFrom},
+                $current->{validFrom}
+            ) <= 0
+        ) {
+            return 0;
+        }
+
+        #
+        # Alten Tarif schließen
+        #
+
+        $current->{validTo} =
+            cm_dateSubtractDay(
+                $editor->{validFrom}
+            );
+    }
+
+    #
+    # Neuen Tarif übernehmen
+    #
+
+    push @{$data->{tariffs}}, { %{$editor} };
+
+    #
+    # Editor löschen
+    #
+
+    $data->{tariffEditor} = {};
+
+    return 1;
+}
+
+###############################################################################
+# Cancel tariff editor
+###############################################################################
+
+sub cm_tariffCancel {
+
+    my ($data) = @_;
+
+    return 0 unless defined $data;
+    return 0 unless ref($data) eq 'HASH';
+
+    $data->{tariffEditor} = {};
+
+    return 1;
+}
+
+1;

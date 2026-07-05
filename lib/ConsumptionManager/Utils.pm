@@ -2,6 +2,7 @@ package ConsumptionManager::Utils;
 
 use strict;
 use warnings;
+use Time::Local;
 use Exporter 'import';
 
 use ConsumptionManager::Constants qw(
@@ -20,6 +21,9 @@ our @EXPORT_OK = qw(
     cm_year
     cm_isNumber
     cm_trim
+    cm_dateCompare
+    cm_dateAddDay
+    cm_dateSubtractDay
 );
 
 our %EXPORT_TAGS = (
@@ -219,6 +223,93 @@ sub cm_trim {
     $text =~ s/^\s+//;
     $text =~ s/\s+$//;
     return $text;
+}
+
+###############################################################################
+# Convert YYYY-MM-DD to unix timestamp
+###############################################################################
+
+sub _cm_dateToEpoch {
+
+    my ($date) = @_;
+
+    return undef
+        unless defined $date;
+
+    return undef
+        unless $date =~ /^(\d{4})-(\d{2})-(\d{2})$/;
+
+    my ($year, $month, $day) = ($1, $2, $3);
+
+    return timelocal(
+        0,
+        0,
+        12,
+        $day,
+        $month - 1,
+        $year
+    );
+}
+
+###############################################################################
+# Compare two dates
+###############################################################################
+
+sub cm_dateCompare {
+
+    my ($date1, $date2) = @_;
+
+    my $t1 = _cm_dateToEpoch($date1);
+    my $t2 = _cm_dateToEpoch($date2);
+
+    return undef
+        unless defined $t1;
+    return undef
+        unless defined $t2;
+
+    return $t1 <=> $t2;
+}
+
+###############################################################################
+# Add days to date
+###############################################################################
+
+sub cm_dateAddDay {
+
+    my ($date, $days) = @_;
+
+    $days = 1 unless defined $days;
+
+    my $epoch = _cm_dateToEpoch($date);
+
+    return undef unless defined $epoch;
+
+    $epoch += ($days * 86400);
+
+    my @lt = localtime($epoch);
+
+    return sprintf(
+        "%04d-%02d-%02d",
+        $lt[5] + 1900,
+        $lt[4] + 1,
+        $lt[3]
+    );
+}
+
+###############################################################################
+# Subtract days from date
+###############################################################################
+
+sub cm_dateSubtractDay {
+
+    my ($date, $days) = @_;
+
+    $days = 1 unless defined $days;
+
+    return cm_dateAddDay(
+        $date,
+        -$days
+    );
 }
 
 1;
