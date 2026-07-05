@@ -20,4 +20,14 @@ use constant CM_DEFAULT_CURRENCY => 'EUR';
 
 use constant CM_DEFAULT_POWER_TIMEOUT => 300;
 
+=head1 NAME
+
+ConsumptionManager::Constants
+
+=head1 DESCRIPTION
+
+Constant values for the ConsumptionManager.
+
+=cut
+
 1;

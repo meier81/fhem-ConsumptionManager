@@ -35,6 +35,18 @@ use ConsumptionManager::Consumption qw(
 
 our $VERSION = CM_VERSION;
 
+=pod
+
+=head1 NAME
+
+FHEM::ConsumptionManager
+
+=head1 DESCRIPTION
+
+Consumption manager for electricity, gas and water.
+
+=cut
+
 #####################################
 sub ConsumptionManager_Initialize($)
 {
@@ -290,15 +302,3 @@ sub ConsumptionManager_PowerTimeout {
 }
 
 1;
-
-=pod
-
-=head1 NAME
-
-FHEM::ConsumptionManager
-
-=head1 DESCRIPTION
-
-Consumption manager for electricity, gas and water.
-
-=cut
