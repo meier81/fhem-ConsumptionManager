@@ -18,6 +18,10 @@ our @EXPORT_OK = qw(
     cm_tariffFind
     cm_tariffValidate
     cm_tariffConvert
+    cm_tariffCreate
+    cm_tariffSetValue
+    cm_tariffSave
+    cm_tariffCancel
 );
 
 our $VERSION = CM_VERSION;
@@ -270,4 +274,56 @@ sub cm_tariffConvert {
       * ($tariff->{stateNumber}    // 1);
 
     return $consumption * $factor;
+}
+
+###############################################################################
+# Create tariff editor
+###############################################################################
+
+sub cm_tariffCreate {
+
+    my ($hash, $data) = @_;
+
+    return 0 unless defined $hash;
+    return 0 unless defined $data;
+
+    my $unitCounter = "kWh";
+    my $unitBilling = "kWh";
+
+    if ($hash->{MEDIUM} eq "gas") {
+
+        $unitCounter = "m3";
+        $unitBilling = "kWh";
+
+    }
+    elsif ($hash->{MEDIUM} eq "water") {
+
+        $unitCounter = "m3";
+        $unitBilling = "m3";
+
+    }
+
+    $data->{tariffEditor} = {
+
+        validFrom => cm_today(),
+        validTo   => '',
+
+        workPrice => 0,
+
+        basePrice => 0,
+
+        basePriceUnit => 'month',
+
+        currency => 'EUR',
+
+        unitCounter => $unitCounter,
+        unitBilling => $unitBilling,
+
+        calorificValue => 1,
+        stateNumber    => 1,
+
+        comment => '',
+    };
+
+    return 1;
 }

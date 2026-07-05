@@ -193,6 +193,8 @@ sub cm_storageCreate {
 
         forecast => {},
 
+        tariffEditor => {},
+
         settings => {
             decimals => 3,
             currency => 'EUR',
@@ -339,6 +341,7 @@ sub cm_storageValidate {
     return 0 unless ref $data->{billing}       eq 'HASH';
     return 0 unless ref $data->{statistics}    eq 'HASH';
     return 0 unless ref $data->{forecast}      eq 'HASH';
+    return 0 unless ref $data->{tariffEditor}  eq 'HASH';
     return 0 unless ref $data->{settings}      eq 'HASH';
     return 1;
 }
