@@ -33,6 +33,11 @@ use ConsumptionManager::Consumption qw(
     cm_consumptionLastYear
 );
 
+use ConsumptionManager::Tariff qw(
+    cm_tariffAdd
+    cm_tariffCurrent
+);
+
 our $VERSION = CM_VERSION;
 
 =pod
@@ -141,6 +146,66 @@ sub ConsumptionManager_Set($@)
             "ConsumptionManager_PowerTimeout",
             $hash,
             0
+        );
+
+        return undef;
+    }
+
+    ###############################################################################
+    # set <device> tariff add ...
+    ###############################################################################
+
+    if ($cmd eq "tariff") {
+
+        return
+    "Usage: set <name> tariff add <validFrom> <workPrice> <basePrice> <day|month|year> [calorificValue] [stateNumber]"
+            unless @a >= 6;
+
+        return "Only 'add' is supported"
+            unless $a[2] eq "add";
+
+        my $data = cm_coreLoad($hash);
+
+        return "Unable to load storage"
+            unless $data;
+
+        my %tariff = (
+
+            validFrom => $a[3],
+            validTo   => '',
+
+            workPrice => $a[4] + 0,
+
+            basePrice => $a[5] + 0,
+
+            basePriceUnit => $a[6],
+
+            currency => "EUR",
+
+            unitCounter => (
+                $hash->{MEDIUM} eq "gas"
+                ? "m3"
+                : "kWh"
+            ),
+
+            unitBilling => "kWh",
+
+            calorificValue =>
+                defined $a[7] ? $a[7] : 1,
+
+            stateNumber =>
+                defined $a[8] ? $a[8] : 1,
+        );
+
+        return "Invalid tariff"
+            unless cm_tariffAdd(
+                $data,
+                \%tariff
+            );
+
+        cm_coreSave(
+            $hash,
+            $data
         );
 
         return undef;

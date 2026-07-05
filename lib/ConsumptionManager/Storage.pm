@@ -199,6 +199,19 @@ sub cm_storageCreate {
         },
     };
 
+    ###############################################################################
+    # Medium specific defaults
+    ###############################################################################
+
+    if ($hash->{MEDIUM} eq 'gas') {
+        $data->{tariffs}[0]{unitCounter} = 'm3';
+        $data->{tariffs}[0]{unitBilling} = 'kWh';
+    }
+    elsif ($hash->{MEDIUM} eq 'water') {
+        $data->{tariffs}[0]{unitCounter} = 'm3';
+        $data->{tariffs}[0]{unitBilling} = 'm3';
+    }
+
     return cm_storageSave($hash, $data);
 }
 

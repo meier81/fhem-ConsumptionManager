@@ -1,4 +1,4 @@
-package ConsumptionManager::Defaults;
+package ConsumptionManager::Constants;
 
 use strict;
 use warnings;
@@ -10,6 +10,7 @@ our @EXPORT_OK = qw(
     CM_VERSION
     CM_DEFAULT_DECIMALS
     CM_DEFAULT_CURRENCY
+    CM_DEFAULT_POWER_TIMEOUT
 );
 
 use constant CM_SCHEMA_VERSION   => 1;
