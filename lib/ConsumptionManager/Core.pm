@@ -92,13 +92,24 @@ sub cm_coreLoad {
     return $data;
 }
 
+###############################################################################
+# Save storage
+###############################################################################
+
 sub cm_coreSave {
+
     my ($hash, $data) = @_;
 
-    return 0 unless defined $hash;
-    return 0 unless defined $data;
+    return 0
+        unless defined $hash;
 
-    return cm_storageSave($hash, $data);
+    return 0
+        unless defined $data;
+
+    return cm_storageSave(
+        $hash,
+        $data
+    );
 }
 
 sub cm_coreSetCounter {

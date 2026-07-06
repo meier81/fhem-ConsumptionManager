@@ -20,6 +20,7 @@ use ConsumptionManager::Core qw(
     cm_coreInitialize
     cm_coreInitializeDevice
     cm_coreLoad
+    cm_coreSave
     cm_coreSetCounter
     cm_coreResetPower
 );
@@ -35,6 +36,10 @@ use ConsumptionManager::Consumption qw(
 
 use ConsumptionManager::Tariff qw(
     cm_tariffAdd
+    cm_tariffCreate
+    cm_tariffSetValue
+    cm_tariffSave
+    cm_tariffCancel
     cm_tariffCurrent
 );
 
@@ -152,66 +157,18 @@ sub ConsumptionManager_Set($@)
     }
 
     ###############################################################################
-    # set <device> tariff add ...
+    # tariff
     ###############################################################################
 
     if ($cmd eq "tariff") {
 
-        return
-    "Usage: set <name> tariff add <validFrom> <workPrice> <basePrice> <day|month|year> [calorificValue] [stateNumber]"
-            unless @a >= 6;
-
-        return "Only 'add' is supported"
-            unless $a[2] eq "add";
-
-        my $data = cm_coreLoad($hash);
-
-        return "Unable to load storage"
-            unless $data;
-
-        my %tariff = (
-
-            validFrom => $a[3],
-            validTo   => '',
-
-            workPrice => $a[4] + 0,
-
-            basePrice => $a[5] + 0,
-
-            basePriceUnit => $a[6],
-
-            currency => "EUR",
-
-            unitCounter => (
-                $hash->{MEDIUM} eq "gas"
-                ? "m3"
-                : "kWh"
-            ),
-
-            unitBilling => "kWh",
-
-            calorificValue =>
-                defined $a[7] ? $a[7] : 1,
-
-            stateNumber =>
-                defined $a[8] ? $a[8] : 1,
-        );
-
-        return "Invalid tariff"
-            unless cm_tariffAdd(
-                $data,
-                \%tariff
-            );
-
-        cm_coreSave(
+        return ConsumptionManager_SetTariff(
             $hash,
-            $data
+            @a
         );
-
-        return undef;
     }
 
-    return "Unknown argument $cmd, choose one of counter";
+    return "Unknown argument $cmd, choose one of counter:noArg tariff";
 }
 
 #####################################
@@ -364,6 +321,109 @@ sub ConsumptionManager_PowerTimeout {
     );
 
     return;
+}
+
+###############################################################################
+# Tariff commands
+###############################################################################
+
+sub ConsumptionManager_SetTariff {
+
+    my ($hash, @a) = @_;
+
+    return "Usage: set <name> tariff create|save|cancel|..."
+        if @a < 3;
+
+    my $action = $a[2];
+
+    my $data = cm_coreLoad($hash);
+
+    return "Unable to load storage"
+        unless $data;
+
+    #
+    # create
+    #
+
+    if ($action eq "create") {
+
+        return "Unable to create tariff"
+            unless cm_tariffCreate(
+                $hash,
+                $data
+            );
+
+        cm_coreSave(
+            $hash,
+            $data
+        );
+
+        return undef;
+    }
+
+    #
+    # save
+    #
+
+    if ($action eq "save") {
+
+        return "Unable to save tariff"
+            unless cm_tariffSave(
+                $data
+            );
+
+        cm_coreSave(
+            $hash,
+            $data
+        );
+
+        return undef;
+    }
+
+    #
+    # cancel
+    #
+
+    if ($action eq "cancel") {
+
+        cm_tariffCancel(
+            $data
+        );
+
+        cm_coreSave(
+            $hash,
+            $data
+        );
+
+        return undef;
+    }
+
+    ###############################################################################
+    # set value
+    ###############################################################################
+
+    if (@a == 4) {
+
+        my $field = $action;
+        my $value = $a[3];
+
+        return "Invalid tariff value"
+            unless cm_tariffSetValue(
+                $data,
+                $field,
+                $value
+            );
+
+        return "Unable to save storage"
+            unless cm_coreSave(
+                $hash,
+                $data
+            );
+
+        return undef;
+    }
+
+    return "Unknown tariff command, choose one of create save cancel validFrom validTo workPrice basePrice basePriceUnit currency unitCounter unitBilling calorificValue stateNumber comment";
 }
 
 1;
