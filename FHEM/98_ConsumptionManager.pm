@@ -41,6 +41,7 @@ use ConsumptionManager::Tariff qw(
     cm_tariffSave
     cm_tariffCancel
     cm_tariffCurrent
+    cm_tariffFind
 );
 
 our $VERSION = CM_VERSION;
@@ -191,7 +192,91 @@ sub ConsumptionManager_Get($@)
         return $data->{meter}{current};
     }
 
-    return "Unknown argument $cmd, choose one of counter";
+    ###############################################################################
+    # tariff
+    ###############################################################################
+
+    if ($cmd eq "tariff") {
+
+        my $data = cm_coreLoad($hash);
+
+        return "Unable to load storage"
+            unless $data;
+
+        my $tariff = cm_tariffCurrent($data);
+
+        return "No tariff defined"
+            unless defined $tariff;
+
+        my $text = "";
+
+        $text .= "Current tariff\n";
+        $text .= "==============================\n";
+
+        $text .= sprintf(
+            "%-20s %s\n",
+            "Valid from:",
+            $tariff->{validFrom}
+        );
+
+        $text .= sprintf(
+            "%-20s %s\n",
+            "Valid to:",
+            $tariff->{validTo}
+        );
+
+        $text .= sprintf(
+            "%-20s %.4f\n",
+            "Work price:",
+            $tariff->{workPrice}
+        );
+
+        $text .= sprintf(
+            "%-20s %.2f\n",
+            "Base price:",
+            $tariff->{basePrice}
+        );
+
+        $text .= sprintf(
+            "%-20s %s\n",
+            "Base unit:",
+            $tariff->{basePriceUnit}
+        );
+
+        $text .= sprintf(
+            "%-20s %s\n",
+            "Counter unit:",
+            $tariff->{unitCounter}
+        );
+
+        $text .= sprintf(
+            "%-20s %s\n",
+            "Billing unit:",
+            $tariff->{unitBilling}
+        );
+
+        $text .= sprintf(
+            "%-20s %.4f\n",
+            "Calorific value:",
+            $tariff->{calorificValue}
+        );
+
+        $text .= sprintf(
+            "%-20s %.4f\n",
+           "State number:",
+            $tariff->{stateNumber}
+        );
+
+        $text .= sprintf(
+            "%-20s %s\n",
+            "Currency:",
+            $tariff->{currency}
+        );
+
+        return $text;
+    }
+
+    return "Unknown argument $cmd, choose one of counter tariff";
 }
 
 #####################################
