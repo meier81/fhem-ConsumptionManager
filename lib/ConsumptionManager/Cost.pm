@@ -17,6 +17,10 @@ use ConsumptionManager::Consumption qw(
     cm_consumptionLastYear
 );
 
+use ConsumptionManager::Tariff qw(
+    cm_tariffConvert
+);
+
 our @EXPORT_OK = qw(
     cm_costToday
     cm_costYesterday
@@ -25,6 +29,7 @@ our @EXPORT_OK = qw(
     cm_costYear
     cm_costLastYear
     cm_costValue
+    cm_costCalculateWork
 );
 
 our $VERSION = CM_VERSION;
@@ -138,6 +143,55 @@ sub cm_costLastYear {
         cm_consumptionLastYear($data),
         $price
     );
+}
+
+###############################################################################
+# Calculate work cost
+###############################################################################
+
+sub cm_costCalculateWork {
+
+    my ($consumption, $tariff) = @_;
+
+    return undef
+        unless defined $consumption;
+
+    return undef
+        unless defined $tariff
+        && ref($tariff) eq 'HASH';
+
+    return undef
+        unless defined $tariff->{workPrice};
+
+    return undef
+        unless $consumption
+            =~ /^-?\d+(?:\.\d+)?$/;
+
+    return undef
+        unless $tariff->{workPrice}
+            =~ /^\d+(?:\.\d+)?$/;
+
+    #
+    # Verbrauch in die Abrechnungseinheit umrechnen.
+    #
+    # Strom:
+    #   kWh -> kWh
+    #
+    # Gas:
+    #   m3 -> kWh
+    #
+
+    my $billingConsumption =
+        cm_tariffConvert(
+            $consumption,
+            $tariff
+        );
+
+    my $cost =
+        $billingConsumption
+        * $tariff->{workPrice};
+
+    return $cost;
 }
 
 1;
