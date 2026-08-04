@@ -34,6 +34,10 @@ use ConsumptionManager::Consumption qw(
     cm_consumptionLastYear
 );
 
+use ConsumptionManager::Cost qw(
+    cm_costCalculateWork
+);
+
 use ConsumptionManager::Tariff qw(
     cm_tariffAdd
     cm_tariffCreate
@@ -41,6 +45,7 @@ use ConsumptionManager::Tariff qw(
     cm_tariffSave
     cm_tariffCancel
     cm_tariffCurrent
+    cm_tariffConvert
     cm_tariffFind
 );
 
@@ -276,7 +281,98 @@ sub ConsumptionManager_Get($@)
         return $text;
     }
 
-    return "Unknown argument $cmd, choose one of counter tariff";
+    ###############################################################################
+    # testCost
+    ###############################################################################
+
+    if ($cmd eq "testCost") {
+
+        return "Usage: get ".$a[0]." testCost <consumption>"
+            if (@a != 3);
+
+        my $consumption = $a[2];
+
+        return "Invalid consumption"
+            unless defined $consumption
+            && $consumption =~ /^\d+(?:\.\d+)?$/;
+
+        my $data = cm_coreLoad($hash);
+
+        return "Unable to load storage"
+            unless $data;
+
+        my $tariff = cm_tariffCurrent($data);
+
+        return "No current tariff defined"
+            unless defined $tariff;
+
+        my $billingConsumption = cm_tariffConvert(
+            $consumption,
+            $tariff
+        );
+
+        my $cost = cm_costCalculateWork(
+            $consumption,
+            $tariff
+        );
+
+        return "Unable to calculate costs"
+            unless defined $cost;
+
+        my $currency    = $tariff->{currency}     // "EUR";
+        my $counterUnit = $tariff->{unitCounter}  // "";
+        my $billingUnit = $tariff->{unitBilling}  // "";
+
+        my $text = "";
+
+        $text .= "Cost calculation test\n";
+        $text .= "==============================\n";
+
+        $text .= sprintf(
+            "%-22s %.4f %s\n",
+            "Consumption:",
+            $consumption,
+            $counterUnit
+        );
+
+        $text .= sprintf(
+            "%-22s %.4f\n",
+            "Calorific value:",
+            $tariff->{calorificValue} // 1
+        );
+
+        $text .= sprintf(
+            "%-22s %.4f\n",
+            "State number:",
+            $tariff->{stateNumber} // 1
+        );
+
+        $text .= sprintf(
+            "%-22s %.4f %s\n",
+            "Billing consumption:",
+            $billingConsumption,
+            $billingUnit
+        );
+
+        $text .= sprintf(
+            "%-22s %.6f %s/%s\n",
+            "Work price:",
+            $tariff->{workPrice},
+            $currency,
+            $billingUnit
+        );
+
+        $text .= sprintf(
+            "%-22s %.4f %s\n",
+            "Work costs:",
+            $cost,
+            $currency
+        );
+
+        return $text;
+    }
+
+    return "Unknown argument $cmd, choose one of counter tariff testCost";
 }
 
 #####################################
