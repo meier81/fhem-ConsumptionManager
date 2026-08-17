@@ -2,7 +2,7 @@ package ConsumptionManager::Storage;
 
 use strict;
 use warnings;
-use JSON;
+use JSON::PP;
 use File::Copy;
 use File::Path qw(make_path);
 use File::Spec;
@@ -11,26 +11,19 @@ use Exporter 'import';
 use ConsumptionManager::Constants qw(
     CM_VERSION
     CM_SCHEMA_VERSION
+    CM_DEFAULT_DECIMALS
+    CM_DEFAULT_CURRENCY
 );
 
 use ConsumptionManager::Utils qw(
     cm_timestamp
+    cm_dateKeys
 );
 
 our @EXPORT_OK = qw(
     cm_storageCreate
     cm_storageLoad
     cm_storageSave
-    cm_storageBackup
-    cm_storageRestore
-    cm_storageFilename
-    cm_storageExists
-    cm_storageValidate
-    cm_storageMigrate
-);
-
-our %EXPORT_TAGS = (
-    all => \@EXPORT_OK,
 );
 
 our $VERSION = CM_VERSION;
@@ -39,71 +32,11 @@ our $VERSION = CM_VERSION;
 
 =head1 NAME
 
-ConsumptionManager::Storage - JSON-Storage-Funktionen für das ConsumptionManager FHEM-Modul
-
-=head1 SYNOPSIS
-
-    use ConsumptionManager::Storage qw(:all);
-
-    my $filename = cm_storageFilename($hash);
-    cm_storageCreate($hash);
-    my $data = cm_storageLoad($hash);
-    cm_storageSave($hash, $data);
+ConsumptionManager::Storage - JSON persistence and schema migration.
 
 =head1 DESCRIPTION
 
-Dieses Modul kapselt das Lesen, Schreiben und Verwalten von JSON-Speicherdateien.
-Alle JSON-Zugriffe erfolgen ausschließlich in dieser Datei. Es werden nur Core-
-Module und die explizit genannten Module verwendet.
-
-=head1 FUNCTIONS
-
-=over 4
-
-=item cm_storageFilename($hash)
-
-Ermittelt den vollständigen Dateinamen für den Storage der Device-Daten. Wenn
-kein Attribut C<storageDir> vorhanden ist, wird C<./log/> als Verzeichnis
-verwendet.
-
-=item cm_storageCreate($hash)
-
-Erzeugt eine neue JSON-Datei mit dem Standard-Datenlayout. Die Datei wird nur
-angelegt, wenn ein gültiger Device-Name verfügbar ist.
-
-=item cm_storageLoad($hash)
-
-Liest die JSON-Datei ein und gibt die in Perl-Strukturen dekodierten Daten
-zurück. Bei Fehlern wird C<undef> zurückgegeben.
-
-=item cm_storageSave($hash, $data)
-
-Schreibt die übergebenen Daten als formatiertes UTF-8 JSON in die Storage-Datei.
-Vorher wird automatisch ein Backup erzeugt.
-
-=item cm_storageBackup($hash)
-
-Kopiert die aktuelle JSON-Datei in eine Backup-Datei mit der Endung C<.bak>.
-
-=item cm_storageRestore($hash)
-
-Stellt eine vorhandene Backup-Datei wieder her.
-
-=item cm_storageExists($hash)
-
-Prüft, ob die Storage-Datei existiert, und gibt C<1> oder C<0> zurück.
-
-=item cm_storageValidate($hash, $data)
-
-Prüft, ob die Daten die Mindeststruktur besitzen. Liefert C<1> bei Erfolg oder
-C<0> bei ungültigen Daten.
-
-=item cm_storageMigrate($hash, $data)
-
-Falls ein älteres Schema vorhanden ist, kann hier die Migration stattfinden.
-Für Version C<0.1> werden die Daten unverändert zurückgegeben.
-
-=back
+Creates, loads, validates, migrates and saves one JSON file per device.
 
 =cut
 
@@ -113,8 +46,8 @@ sub cm_storageFilename {
     return undef unless defined $hash;
 
     my $device = $hash->{NAME} || $hash->{name};
-    $device =~ s/[^\w.-]/_/g;
     return undef unless defined $device && length $device;
+    $device =~ s/[^\w.-]/_/g;
 
     my $storage_dir = undef;
     if (ref $hash eq 'HASH') {
@@ -154,75 +87,47 @@ sub cm_storageCreate {
 
         meter => {
             current         => undef,
-            previous        => undef,
+            counterDecimals => undef,
             lastTimestamp   => 0,
-            lastConsumption => undef,
-            powerCurrent    => 0,
-            virtual         => 0,
-            offset          => 0,
-            lastUpdate      => '',
+            powerCurrent  => 0,
+            virtual       => undef,
+            offset        => 0,
+            lastUpdate    => '',
         },
 
         meterChanges => [],
 
         consumption => {
-            lastDayKey   => '',
-            lastMonthKey => '',
-            lastYearKey  => '',
-            
+            dayKey         => '',
+            dayBaseline    => undef,
             yesterday      => 0,
-            lastMonthValue => 0,
-            lastYearValue  => 0,
 
-            daily   => {},
-            monthly => {},
-            yearly  => {},
+            monthKey       => '',
+            monthBaseline  => undef,
+            lastMonthValue => 0,
+
+            yearKey        => '',
+            yearBaseline   => undef,
+            lastYearValue  => 0,
         },
 
         tariffs => [],
 
-        payments => [],
+        advances => [],
 
-        billing => {
-            currentCosts => 0,
-            paid         => 0,
-            balance      => 0,
-        },
-
-        statistics => {},
-
-        forecast => {},
 
         tariffEditor => {},
 
+        advanceEditor => {},
+
+
         settings => {
-            decimals => 3,
-            currency => 'EUR',
+            decimals => CM_DEFAULT_DECIMALS,
+            currency => CM_DEFAULT_CURRENCY,
         },
     };
 
-    ###############################################################################
-    # Medium specific defaults
-    ###############################################################################
-
-    if ($hash->{MEDIUM} eq 'gas') {
-        $data->{tariffs}[0]{unitCounter} = 'm3';
-        $data->{tariffs}[0]{unitBilling} = 'kWh';
-    }
-    elsif ($hash->{MEDIUM} eq 'water') {
-        $data->{tariffs}[0]{unitCounter} = 'm3';
-        $data->{tariffs}[0]{unitBilling} = 'm3';
-    }
-
     return cm_storageSave($hash, $data);
-}
-
-sub cm_storageExists {
-    my ($hash) = @_;
-
-    my $filename = cm_storageFilename($hash);
-    return 0 unless defined $filename;
-    return -f $filename ? 1 : 0;
 }
 
 sub cm_storageLoad {
@@ -242,21 +147,20 @@ sub cm_storageLoad {
     my $json_text = <$fh>;
     close $fh;
 
-    my $json = JSON->new->utf8->relaxed;
+    my $json = JSON::PP->new->relaxed;
     my $data = eval { $json->decode($json_text) };
     if ($@) {
         warn "Unable to decode JSON from '$filename': $@";
         return undef;
     }
 
-    # JSON-Struktur prüfen
+    # Schema ggf. migrieren, anschließend Struktur prüfen.
+    $data = cm_storageMigrate($hash, $data);
+
     unless (cm_storageValidate($hash, $data)) {
         warn "Invalid storage structure in '$filename'";
         return undef;
     }
-
-    # Schema ggf. migrieren
-    $data = cm_storageMigrate($hash, $data);
 
     return $data;
 }
@@ -273,9 +177,9 @@ sub cm_storageSave {
     my $dir = File::Spec->catpath((File::Spec->splitpath($filename))[0,1]);
     make_path($dir) unless -d $dir;
 
-    cm_storageBackup($hash) if -f $filename;
+    _cm_storageBackup($hash) if -f $filename;
 
-    my $json = JSON->new->utf8->pretty->canonical;
+    my $json = JSON::PP->new->pretty->canonical;
     my $json_text = eval { $json->encode($data) };
     if ($@) {
         warn "Unable to encode data to JSON: $@";
@@ -294,7 +198,7 @@ sub cm_storageSave {
     return 1;
 }
 
-sub cm_storageBackup {
+sub _cm_storageBackup {
     my ($hash) = @_;
 
     my $filename = cm_storageFilename($hash);
@@ -310,23 +214,6 @@ sub cm_storageBackup {
     return 0;
 }
 
-sub cm_storageRestore {
-    my ($hash) = @_;
-
-    my $filename = cm_storageFilename($hash);
-    return 0 unless defined $filename;
-
-    my $backup_file = "$filename.bak";
-    return 0 unless -f $backup_file;
-
-    if (copy($backup_file, $filename)) {
-        return 1;
-    }
-
-    warn "Unable to restore backup file '$backup_file' to '$filename': $!";
-    return 0;
-}
-
 sub cm_storageValidate {
     my ($hash, $data) = @_;
 
@@ -334,23 +221,251 @@ sub cm_storageValidate {
     return 0 unless exists $data->{schema};
     return 0 unless ref $data->{device}        eq 'HASH';
     return 0 unless ref $data->{meter}         eq 'HASH';
-    return 0 unless ref $data->{consumption}   eq 'HASH';
     return 0 unless ref $data->{meterChanges}  eq 'ARRAY';
+    return 0 unless ref $data->{consumption}   eq 'HASH';
     return 0 unless ref $data->{tariffs}       eq 'ARRAY';
-    return 0 unless ref $data->{payments}      eq 'ARRAY';
-    return 0 unless ref $data->{billing}       eq 'HASH';
-    return 0 unless ref $data->{statistics}    eq 'HASH';
-    return 0 unless ref $data->{forecast}      eq 'HASH';
+    return 0 unless ref $data->{advances}      eq 'ARRAY';
     return 0 unless ref $data->{tariffEditor}  eq 'HASH';
+    return 0 unless ref $data->{advanceEditor} eq 'HASH';
     return 0 unless ref $data->{settings}      eq 'HASH';
     return 1;
+}
+
+sub _cm_storageNumber {
+    my ($value) = @_;
+    return defined($value)
+        && $value =~ /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
+}
+
+sub _cm_storageOffsetBeforeDate {
+    my ($data, $date) = @_;
+    return 0 unless ref($data) eq 'HASH' && defined $date;
+
+    my $offset = 0;
+    for my $change (@{ $data->{meterChanges} || [] }) {
+        next unless ref($change) eq 'HASH';
+        next unless defined $change->{date} && $change->{date} lt $date;
+
+        if (_cm_storageNumber($change->{offsetDelta})) {
+            $offset += $change->{offsetDelta};
+        }
+        elsif (_cm_storageNumber($change->{oldCounter})
+            && _cm_storageNumber($change->{newCounter})) {
+            $offset += $change->{oldCounter} - $change->{newCounter};
+        }
+    }
+
+    return $offset;
 }
 
 sub cm_storageMigrate {
     my ($hash, $data) = @_;
 
-    return $data unless defined $data && ref $data eq 'HASH';
-    return $data if defined $data->{schema} && $data->{schema} >= 1;
+    return undef unless defined $data && ref $data eq 'HASH';
+
+    $data->{meta}         ||= {};
+    $data->{device}       ||= {};
+    $data->{meter}        ||= {};
+    $data->{meterChanges}  = [] unless ref $data->{meterChanges} eq 'ARRAY';
+    $data->{consumption}  ||= {};
+    $data->{tariffs}       = [] unless ref $data->{tariffs} eq 'ARRAY';
+    $data->{advances}      = [] unless ref $data->{advances} eq 'ARRAY';
+    $data->{tariffEditor} ||= {};
+    $data->{advanceEditor} ||= {};
+    $data->{settings}     ||= {};
+
+    # Calendar-year billing is calculated dynamically. Remove legacy manual
+    # billing-period configuration during migration.
+    delete $data->{billing};
+    delete $data->{billingEditor};
+    delete $data->{payments};
+    delete $data->{statistics};
+    delete $data->{forecast};
+
+    if (defined $data->{meter}{counterDecimals}
+        && $data->{meter}{counterDecimals} !~ /^\d+$/) {
+        $data->{meter}{counterDecimals} = undef;
+    }
+
+    # Older schemas initialized virtual to 0 even before a first counter value.
+    if (!defined $data->{meter}{current}
+        && defined $data->{meter}{virtual}
+        && $data->{meter}{virtual} == 0) {
+        $data->{meter}{virtual} = undef;
+    }
+
+    my ($currentDay, $currentMonth, $currentYear) = cm_dateKeys();
+    my $currentVirtual;
+
+    if (_cm_storageNumber($data->{meter}{virtual})) {
+        $currentVirtual = 0 + $data->{meter}{virtual};
+    }
+    elsif (_cm_storageNumber($data->{meter}{current})) {
+        $currentVirtual = 0 + $data->{meter}{current} + ($data->{meter}{offset} // 0);
+        $data->{meter}{virtual} = $currentVirtual;
+    }
+
+    my $oldConsumption = $data->{consumption};
+
+    # Migrate only the six user-visible period values plus the three current
+    # baselines. Historic daily/monthly/yearly time series are intentionally
+    # discarded.
+    my $dayValue =
+        ref($oldConsumption->{daily}) eq 'HASH'
+        && ref($oldConsumption->{daily}{$currentDay}) eq 'HASH'
+            ? $oldConsumption->{daily}{$currentDay}{value}
+            : undef;
+
+    my $monthValue =
+        ref($oldConsumption->{monthly}) eq 'HASH'
+        && ref($oldConsumption->{monthly}{$currentMonth}) eq 'HASH'
+            ? $oldConsumption->{monthly}{$currentMonth}{value}
+            : undef;
+
+    my $yearValue =
+        ref($oldConsumption->{yearly}) eq 'HASH'
+        && ref($oldConsumption->{yearly}{$currentYear}) eq 'HASH'
+            ? $oldConsumption->{yearly}{$currentYear}{value}
+            : undef;
+
+    my ($dayBaseline, $monthBaseline, $yearBaseline);
+
+    if (_cm_storageNumber($currentVirtual) && _cm_storageNumber($dayValue)) {
+        $dayBaseline = $currentVirtual - $dayValue;
+    }
+
+    if (ref($data->{meter}{monthBaselines}) eq 'HASH'
+        && exists $data->{meter}{monthBaselines}{$currentMonth}
+        && _cm_storageNumber($data->{meter}{monthBaselines}{$currentMonth})) {
+        $monthBaseline =
+            $data->{meter}{monthBaselines}{$currentMonth}
+            + _cm_storageOffsetBeforeDate($data, $currentMonth . '-01');
+    }
+    elsif (_cm_storageNumber($currentVirtual) && _cm_storageNumber($monthValue)) {
+        $monthBaseline = $currentVirtual - $monthValue;
+    }
+
+    if (ref($data->{meter}{yearBaselines}) eq 'HASH'
+        && exists $data->{meter}{yearBaselines}{$currentYear}
+        && _cm_storageNumber($data->{meter}{yearBaselines}{$currentYear})) {
+        $yearBaseline =
+            $data->{meter}{yearBaselines}{$currentYear}
+            + _cm_storageOffsetBeforeDate($data, $currentYear . '-01-01');
+    }
+    elsif (_cm_storageNumber($currentVirtual) && _cm_storageNumber($yearValue)) {
+        $yearBaseline = $currentVirtual - $yearValue;
+    }
+
+    # If the file already uses the compact schema, preserve its baselines.
+    $dayBaseline = $oldConsumption->{dayBaseline}
+        if _cm_storageNumber($oldConsumption->{dayBaseline});
+    $monthBaseline = $oldConsumption->{monthBaseline}
+        if _cm_storageNumber($oldConsumption->{monthBaseline});
+    $yearBaseline = $oldConsumption->{yearBaseline}
+        if _cm_storageNumber($oldConsumption->{yearBaseline});
+
+    $data->{consumption} = {
+        dayKey         => $oldConsumption->{dayKey} // $currentDay,
+        dayBaseline    => $dayBaseline,
+        yesterday      => $oldConsumption->{yesterday} // 0,
+
+        monthKey       => $oldConsumption->{monthKey} // $currentMonth,
+        monthBaseline  => $monthBaseline,
+        lastMonthValue => $oldConsumption->{lastMonthValue} // 0,
+
+        yearKey        => $oldConsumption->{yearKey} // $currentYear,
+        yearBaseline   => $yearBaseline,
+        lastYearValue  => $oldConsumption->{lastYearValue} // 0,
+    };
+
+    delete $data->{meter}{previous};
+    delete $data->{meter}{firstCounter};
+    delete $data->{meter}{firstTimestamp};
+    delete $data->{meter}{lastConsumption};
+    delete $data->{meter}{yearBaselines};
+    delete $data->{meter}{monthBaselines};
+
+    # Ensure stable IDs for data created by older versions. Existing IDs are
+    # preserved; missing IDs are assigned deterministically in validity order.
+    my %usedTariffIds = map {
+        (ref($_) eq 'HASH' && defined($_->{id}) && $_->{id} =~ /^\d+$/)
+            ? ($_->{id} => 1) : ()
+    } @{$data->{tariffs}};
+    my $nextTariffId = 1;
+    for my $tariff (sort {
+        ($a->{validFrom} // '') cmp ($b->{validFrom} // '')
+    } grep { ref($_) eq 'HASH' } @{$data->{tariffs}}) {
+        unless (defined($tariff->{id}) && $tariff->{id} =~ /^\d+$/) {
+            $nextTariffId++ while $usedTariffIds{$nextTariffId};
+            $tariff->{id} = $nextTariffId;
+            $usedTariffIds{$nextTariffId} = 1;
+        }
+    }
+
+    my %usedAdvanceIds = map {
+        (ref($_) eq 'HASH' && defined($_->{id}) && $_->{id} =~ /^\d+$/)
+            ? ($_->{id} => 1) : ()
+    } @{$data->{advances}};
+    my $nextAdvanceId = 1;
+    for my $advance (sort {
+        ($a->{validFrom} // '') cmp ($b->{validFrom} // '')
+    } grep { ref($_) eq 'HASH' } @{$data->{advances}}) {
+        unless (defined($advance->{id}) && $advance->{id} =~ /^\d+$/) {
+            $nextAdvanceId++ while $usedAdvanceIds{$nextAdvanceId};
+            $advance->{id} = $nextAdvanceId;
+            $usedAdvanceIds{$nextAdvanceId} = 1;
+        }
+    }
+
+    for my $tariff (@{$data->{tariffs}}) {
+        next unless ref($tariff) eq 'HASH';
+        $tariff->{counterSnapshot} = undef
+            unless exists $tariff->{counterSnapshot};
+        $tariff->{counterSnapshotDate} //= '';
+        $tariff->{counterSnapshotSource} //= '';
+        $tariff->{counterSnapshotExact} =
+            $tariff->{counterSnapshotExact} ? 1 : 0;
+        $tariff->{assessmentFactor} //= 1;
+
+        # Schema 12: split the former single surface-drainage component into
+        # two independent annual EUR/m2 components. Existing surfaceArea/
+        # surfacePrice values represent the usage fee and are preserved there.
+        $tariff->{surfaceUsageArea} =
+            exists $tariff->{surfaceUsageArea}
+                ? $tariff->{surfaceUsageArea}
+                : ($tariff->{surfaceArea} // 0);
+        $tariff->{surfaceUsagePrice} =
+            exists $tariff->{surfaceUsagePrice}
+                ? $tariff->{surfaceUsagePrice}
+                : ($tariff->{surfacePrice} // 0);
+        $tariff->{surfaceRecurringArea}  //= 0;
+        $tariff->{surfaceRecurringPrice} //= 0;
+        delete $tariff->{surfaceArea};
+        delete $tariff->{surfacePrice};
+    }
+
+    if (ref($data->{tariffEditor}) eq 'HASH' && keys %{$data->{tariffEditor}}) {
+        $data->{tariffEditor}{assessmentFactor} //= 1;
+        $data->{tariffEditor}{surfaceUsageArea} =
+            exists $data->{tariffEditor}{surfaceUsageArea}
+                ? $data->{tariffEditor}{surfaceUsageArea}
+                : ($data->{tariffEditor}{surfaceArea} // 0);
+        $data->{tariffEditor}{surfaceUsagePrice} =
+            exists $data->{tariffEditor}{surfaceUsagePrice}
+                ? $data->{tariffEditor}{surfaceUsagePrice}
+                : ($data->{tariffEditor}{surfacePrice} // 0);
+        $data->{tariffEditor}{surfaceRecurringArea}  //= 0;
+        $data->{tariffEditor}{surfaceRecurringPrice} //= 0;
+        delete $data->{tariffEditor}{surfaceArea};
+        delete $data->{tariffEditor}{surfacePrice};
+    }
+
+    $data->{settings}{decimals} //= CM_DEFAULT_DECIMALS;
+    $data->{settings}{currency} //= CM_DEFAULT_CURRENCY;
+
+    $data->{schema} = CM_SCHEMA_VERSION;
+    $data->{meta}{moduleVersion} = CM_VERSION;
+
     return $data;
 }
 

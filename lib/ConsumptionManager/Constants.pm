@@ -13,8 +13,8 @@ our @EXPORT_OK = qw(
     CM_DEFAULT_POWER_TIMEOUT
 );
 
-use constant CM_SCHEMA_VERSION   => 1;
-use constant CM_VERSION          => '0.2.0';
+use constant CM_SCHEMA_VERSION   => 15;
+use constant CM_VERSION          => '0.5.4';
 
 use constant CM_DEFAULT_DECIMALS => 3;
 use constant CM_DEFAULT_CURRENCY => 'EUR';

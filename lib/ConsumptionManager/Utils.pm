@@ -10,24 +10,16 @@ use ConsumptionManager::Constants qw(
 );
 
 our @EXPORT_OK = qw(
-    cm_log
-    cm_debug
-    cm_round
     cm_timestamp
     cm_dateKeys
     cm_now
     cm_today
     cm_month
     cm_year
-    cm_isNumber
-    cm_trim
     cm_dateCompare
     cm_dateAddDay
     cm_dateSubtractDay
-);
-
-our %EXPORT_TAGS = (
-    all => \@EXPORT_OK,
+    cm_dateDiffDays
 );
 
 our $VERSION = CM_VERSION;
@@ -36,112 +28,13 @@ our $VERSION = CM_VERSION;
 
 =head1 NAME
 
-ConsumptionManager::Utils - Utility-Funktionen für das ConsumptionManager FHEM-Modul
-
-=head1 SYNOPSIS
-
-    use ConsumptionManager::Utils qw(:all);
-
-    cm_log($hash, 'info', 'Nachricht');
-    cm_debug($hash, 'Debug-Ausgabe');
-    my $rounded = cm_round(12.3456, 2);
-    my $now = cm_timestamp();
+ConsumptionManager::Utils - Shared date and time helpers.
 
 =head1 DESCRIPTION
 
-Dieses Modul stellt kleine Hilfsfunktionen zur Verfügung, die in FHEM-Modulen
-verwendet werden können. Es verwendet ausschließlich Perl Core Module und ist
-für den produktiven Einsatz geeignet.
-
-=head1 FUNCTIONS
-
-=over 4
-
-=item cm_log($hash, $level, $msg)
-
-Schreibt eine Nachricht über die FHEM-Funktion C<Log3> ins Log. Das Hash-Referenz
-ist das typische FHEM-Geräte-Hash und C<$level> entspricht FHEM-Log-Leveln wie
-C<info>, C<warning>, C<error> oder C<debug>.
-
-=item cm_debug($hash, $msg)
-
-Schreibt nur dann ins Log, wenn C<$hash->{helper}{debug}> gesetzt ist.
-
-=item cm_round($value, $digits)
-
-Rundet eine Zahl auf die angegebene Anzahl an Nachkommastellen. C<$digits> kann
-negativ sein, um an Zehnerstellen zu runden. Gibt C<undef> zurück, wenn der
-Wert keine Zahl ist.
-
-=item cm_timestamp()
-
-Gibt einen Zeitstempel im Format C<YYYY-MM-DD HH:MM:SS> zurück.
-
-=item cm_today()
-
-Gibt das heutige Datum im Format C<YYYY-MM-DD> zurück.
-
-=item cm_month()
-
-Gibt das aktuelle Jahr und den Monat im Format C<YYYY-MM> zurück.
-
-=item cm_year()
-
-Gibt das aktuelle Jahr im Format C<YYYY> zurück.
-
-=item cm_isNumber($value)
-
-Gibt 1 zurück, wenn der Wert wie eine Zahl aussieht, ansonsten 0.
-
-=item cm_trim($text)
-
-Entfernt führende und nachfolgende Leerzeichen aus dem Text.
-
-=back
+Small, project-wide helpers used by the ConsumptionManager modules.
 
 =cut
-
-sub cm_log {
-    my ($hash, $level, $msg) = @_;
-
-    return unless defined $hash;
-    $level = defined $level ? $level : 'info';
-    $msg   = defined $msg   ? $msg   : '';
-
-    if (defined &Log3) {
-        Log3($hash, $level, $msg);
-    }
-    else {
-        warn "Log3 not available: [$level] $msg\n";
-    }
-}
-
-sub cm_debug {
-    my ($hash, $msg) = @_;
-
-    return unless defined $hash;
-    return unless $hash->{helper} && $hash->{helper}{debug};
-
-    cm_log($hash, 'debug', $msg);
-}
-
-sub cm_round {
-    my ($value, $digits) = @_;
-
-    return undef unless defined $value;
-    return undef unless cm_isNumber($value);
-
-    $digits = 0 unless defined $digits;
-    $digits = int($digits);
-
-    if ($digits >= 0) {
-        my $factor = 10**$digits;
-        return sprintf("%.${digits}f", int($value * $factor + ($value <=> 0) * 0.5) / $factor);
-    }
-
-    my $factor = 10**(-$digits);
-    return sprintf("%.0f", int($value / $factor + ($value <=> 0) * 0.5) * $factor);
-}
 
 sub cm_timestamp {
     my @lt = localtime();
@@ -199,30 +92,13 @@ sub cm_today {
 }
 
 sub cm_month {
-    my @lt = localtime();
-    return sprintf('%04d-%02d', $lt[5] + 1900, $lt[4] + 1);
+    my (undef, $month) = cm_dateKeys();
+    return $month;
 }
 
 sub cm_year {
     my @lt = localtime();
     return sprintf('%04d', $lt[5] + 1900);
-}
-
-sub cm_isNumber {
-    my ($value) = @_;
-
-    return 0 unless defined $value;
-    return 1 if $value =~ /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
-    return 0;
-}
-
-sub cm_trim {
-    my ($text) = @_;
-    return '' unless defined $text;
-
-    $text =~ s/^\s+//;
-    $text =~ s/\s+$//;
-    return $text;
 }
 
 ###############################################################################
@@ -239,16 +115,29 @@ sub _cm_dateToEpoch {
     return undef
         unless $date =~ /^(\d{4})-(\d{2})-(\d{2})$/;
 
-    my ($year, $month, $day) = ($1, $2, $3);
+    my ($year, $month, $day) = ($1 + 0, $2 + 0, $3 + 0);
 
-    return timelocal(
-        0,
-        0,
-        12,
-        $day,
-        $month - 1,
-        $year
-    );
+    my $epoch = eval {
+        timelocal(
+            0,
+            0,
+            12,
+            $day,
+            $month - 1,
+            $year
+        );
+    };
+
+    return undef if $@ || !defined $epoch;
+
+    my @lt = localtime($epoch);
+
+    return undef
+        unless $lt[5] + 1900 == $year
+        && $lt[4] + 1 == $month
+        && $lt[3] == $day;
+
+    return $epoch;
 }
 
 ###############################################################################
@@ -299,6 +188,22 @@ sub cm_dateAddDay {
 ###############################################################################
 # Subtract days from date
 ###############################################################################
+
+
+###############################################################################
+# Difference between two dates in days
+###############################################################################
+
+sub cm_dateDiffDays {
+    my ($date1, $date2) = @_;
+
+    my $t1 = _cm_dateToEpoch($date1);
+    my $t2 = _cm_dateToEpoch($date2);
+
+    return undef unless defined $t1 && defined $t2;
+
+    return int(($t2 - $t1) / 86400);
+}
 
 sub cm_dateSubtractDay {
 
