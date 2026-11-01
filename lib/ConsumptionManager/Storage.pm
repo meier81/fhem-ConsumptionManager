@@ -90,26 +90,13 @@ sub cm_storageCreate {
             counterDecimals => undef,
             lastTimestamp   => 0,
             powerCurrent  => 0,
-            virtual       => undef,
-            offset        => 0,
             lastUpdate    => '',
         },
 
         meterChanges => [],
+        counterHistory => [],
 
-        consumption => {
-            dayKey         => '',
-            dayBaseline    => undef,
-            yesterday      => 0,
-
-            monthKey       => '',
-            monthBaseline  => undef,
-            lastMonthValue => 0,
-
-            yearKey        => '',
-            yearBaseline   => undef,
-            lastYearValue  => 0,
-        },
+        consumption => {},
 
         tariffs => [],
 
@@ -222,6 +209,7 @@ sub cm_storageValidate {
     return 0 unless ref $data->{device}        eq 'HASH';
     return 0 unless ref $data->{meter}         eq 'HASH';
     return 0 unless ref $data->{meterChanges}  eq 'ARRAY';
+    return 0 unless ref $data->{counterHistory} eq 'ARRAY';
     return 0 unless ref $data->{consumption}   eq 'HASH';
     return 0 unless ref $data->{tariffs}       eq 'ARRAY';
     return 0 unless ref $data->{advances}      eq 'ARRAY';
@@ -229,33 +217,6 @@ sub cm_storageValidate {
     return 0 unless ref $data->{advanceEditor} eq 'HASH';
     return 0 unless ref $data->{settings}      eq 'HASH';
     return 1;
-}
-
-sub _cm_storageNumber {
-    my ($value) = @_;
-    return defined($value)
-        && $value =~ /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
-}
-
-sub _cm_storageOffsetBeforeDate {
-    my ($data, $date) = @_;
-    return 0 unless ref($data) eq 'HASH' && defined $date;
-
-    my $offset = 0;
-    for my $change (@{ $data->{meterChanges} || [] }) {
-        next unless ref($change) eq 'HASH';
-        next unless defined $change->{date} && $change->{date} lt $date;
-
-        if (_cm_storageNumber($change->{offsetDelta})) {
-            $offset += $change->{offsetDelta};
-        }
-        elsif (_cm_storageNumber($change->{oldCounter})
-            && _cm_storageNumber($change->{newCounter})) {
-            $offset += $change->{oldCounter} - $change->{newCounter};
-        }
-    }
-
-    return $offset;
 }
 
 sub cm_storageMigrate {
@@ -267,6 +228,7 @@ sub cm_storageMigrate {
     $data->{device}       ||= {};
     $data->{meter}        ||= {};
     $data->{meterChanges}  = [] unless ref $data->{meterChanges} eq 'ARRAY';
+    $data->{counterHistory} = [] unless ref $data->{counterHistory} eq 'ARRAY';
     $data->{consumption}  ||= {};
     $data->{tariffs}       = [] unless ref $data->{tariffs} eq 'ARRAY';
     $data->{advances}      = [] unless ref $data->{advances} eq 'ARRAY';
@@ -287,96 +249,9 @@ sub cm_storageMigrate {
         $data->{meter}{counterDecimals} = undef;
     }
 
-    # Older schemas initialized virtual to 0 even before a first counter value.
-    if (!defined $data->{meter}{current}
-        && defined $data->{meter}{virtual}
-        && $data->{meter}{virtual} == 0) {
-        $data->{meter}{virtual} = undef;
-    }
-
-    my ($currentDay, $currentMonth, $currentYear) = cm_dateKeys();
-    my $currentVirtual;
-
-    if (_cm_storageNumber($data->{meter}{virtual})) {
-        $currentVirtual = 0 + $data->{meter}{virtual};
-    }
-    elsif (_cm_storageNumber($data->{meter}{current})) {
-        $currentVirtual = 0 + $data->{meter}{current} + ($data->{meter}{offset} // 0);
-        $data->{meter}{virtual} = $currentVirtual;
-    }
-
-    my $oldConsumption = $data->{consumption};
-
-    # Migrate only the six user-visible period values plus the three current
-    # baselines. Historic daily/monthly/yearly time series are intentionally
-    # discarded.
-    my $dayValue =
-        ref($oldConsumption->{daily}) eq 'HASH'
-        && ref($oldConsumption->{daily}{$currentDay}) eq 'HASH'
-            ? $oldConsumption->{daily}{$currentDay}{value}
-            : undef;
-
-    my $monthValue =
-        ref($oldConsumption->{monthly}) eq 'HASH'
-        && ref($oldConsumption->{monthly}{$currentMonth}) eq 'HASH'
-            ? $oldConsumption->{monthly}{$currentMonth}{value}
-            : undef;
-
-    my $yearValue =
-        ref($oldConsumption->{yearly}) eq 'HASH'
-        && ref($oldConsumption->{yearly}{$currentYear}) eq 'HASH'
-            ? $oldConsumption->{yearly}{$currentYear}{value}
-            : undef;
-
-    my ($dayBaseline, $monthBaseline, $yearBaseline);
-
-    if (_cm_storageNumber($currentVirtual) && _cm_storageNumber($dayValue)) {
-        $dayBaseline = $currentVirtual - $dayValue;
-    }
-
-    if (ref($data->{meter}{monthBaselines}) eq 'HASH'
-        && exists $data->{meter}{monthBaselines}{$currentMonth}
-        && _cm_storageNumber($data->{meter}{monthBaselines}{$currentMonth})) {
-        $monthBaseline =
-            $data->{meter}{monthBaselines}{$currentMonth}
-            + _cm_storageOffsetBeforeDate($data, $currentMonth . '-01');
-    }
-    elsif (_cm_storageNumber($currentVirtual) && _cm_storageNumber($monthValue)) {
-        $monthBaseline = $currentVirtual - $monthValue;
-    }
-
-    if (ref($data->{meter}{yearBaselines}) eq 'HASH'
-        && exists $data->{meter}{yearBaselines}{$currentYear}
-        && _cm_storageNumber($data->{meter}{yearBaselines}{$currentYear})) {
-        $yearBaseline =
-            $data->{meter}{yearBaselines}{$currentYear}
-            + _cm_storageOffsetBeforeDate($data, $currentYear . '-01-01');
-    }
-    elsif (_cm_storageNumber($currentVirtual) && _cm_storageNumber($yearValue)) {
-        $yearBaseline = $currentVirtual - $yearValue;
-    }
-
-    # If the file already uses the compact schema, preserve its baselines.
-    $dayBaseline = $oldConsumption->{dayBaseline}
-        if _cm_storageNumber($oldConsumption->{dayBaseline});
-    $monthBaseline = $oldConsumption->{monthBaseline}
-        if _cm_storageNumber($oldConsumption->{monthBaseline});
-    $yearBaseline = $oldConsumption->{yearBaseline}
-        if _cm_storageNumber($oldConsumption->{yearBaseline});
-
-    $data->{consumption} = {
-        dayKey         => $oldConsumption->{dayKey} // $currentDay,
-        dayBaseline    => $dayBaseline,
-        yesterday      => $oldConsumption->{yesterday} // 0,
-
-        monthKey       => $oldConsumption->{monthKey} // $currentMonth,
-        monthBaseline  => $monthBaseline,
-        lastMonthValue => $oldConsumption->{lastMonthValue} // 0,
-
-        yearKey        => $oldConsumption->{yearKey} // $currentYear,
-        yearBaseline   => $yearBaseline,
-        lastYearValue  => $oldConsumption->{lastYearValue} // 0,
-    };
+    # Physical history is authoritative. Old virtual baselines cannot be
+    # converted reliably into midnight readings across meter replacements.
+    $data->{consumption} = {};
 
     delete $data->{meter}{previous};
     delete $data->{meter}{firstCounter};
@@ -462,6 +337,20 @@ sub cm_storageMigrate {
 
     $data->{settings}{decimals} //= CM_DEFAULT_DECIMALS;
     $data->{settings}{currency} //= CM_DEFAULT_CURRENCY;
+
+    # Retire legacy virtual-counter state only after the old schema has
+    # been read and migrated. Never synthesize physical midnight readings
+    # from virtual baselines: they are not reliable across replacements.
+    delete $data->{meter}{virtual};
+    delete $data->{meter}{offset};
+    for my $change (@{$data->{meterChanges}}) {
+        next unless ref($change) eq 'HASH';
+        delete @{$change}{qw(offsetDelta offsetBefore offsetAfter)};
+    }
+    delete @{$data->{consumption}}{qw(
+        dayKey dayBaseline yesterday monthKey monthBaseline lastMonthValue
+        yearKey yearBaseline lastYearValue
+    )};
 
     $data->{schema} = CM_SCHEMA_VERSION;
     $data->{meta}{moduleVersion} = CM_VERSION;

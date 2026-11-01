@@ -15,19 +15,15 @@ use ConsumptionManager::Tariff qw(
     cm_tariffFind
     cm_tariffConvert
 );
+use ConsumptionManager::CounterHistory qw(cm_counterHistoryCalculateCurrent cm_counterHistoryCalculateRange);
 use ConsumptionManager::Advance qw(
     cm_advanceFind
 );
-use ConsumptionManager::Consumption qw(
-    cm_consumptionToday
-    cm_consumptionMonth
-);
 
 our @EXPORT_OK = qw(
-    cm_billingCalculate
-    cm_billingCalculatePeriod
-    cm_billingCalculatePreviousPeriod
     cm_billingScheduledAdvances
+    cm_billingCalculatePhysicalPeriod
+    cm_billingCalculatePhysicalYear
 );
 
 our $VERSION = CM_VERSION;
@@ -38,49 +34,9 @@ ConsumptionManager::Billing
 
 =head1 DESCRIPTION
 
-Calendar-year and current-period cost calculation for electricity, gas, water and wastewater. Tariff changes are split at their validity date using exact virtual
-counter snapshots.
+Calendar-year and current-period cost calculation for electricity, gas, water and wastewater. Tariff changes are split at physical midnight boundaries.
 
 =cut
-
-sub _cm_billingOffsetBeforeDate {
-    my ($data, $date) = @_;
-    return 0 unless ref($data) eq 'HASH';
-    return 0 unless defined $date;
-
-    my $offset = 0;
-    for my $change (@{ $data->{meterChanges} // [] }) {
-        next unless ref($change) eq 'HASH';
-        next unless defined $change->{date};
-        next unless $change->{date} lt $date;
-
-        if (defined $change->{offsetDelta}) {
-            $offset += $change->{offsetDelta};
-        }
-        elsif (defined $change->{oldCounter} && defined $change->{newCounter}) {
-            $offset += $change->{oldCounter} - $change->{newCounter};
-        }
-    }
-    return $offset;
-}
-
-sub _cm_billingYearBaseline {
-    my ($data, $year, $currentVirtual) = @_;
-    return undef unless ref($data) eq 'HASH';
-    return undef unless defined $year && $year =~ /^\d{4}$/;
-
-    my $c = $data->{consumption} // {};
-    if (($c->{yearKey} // '') eq $year
-        && _cm_billingNumber($c->{yearBaseline})) {
-        return {
-            counter => 0 + $c->{yearBaseline},
-            source  => 'yearBaseline',
-            exact   => 1,
-        };
-    }
-
-    return undef;
-}
 
 sub cm_billingScheduledAdvances {
     my ($data, $startDate, $endDate) = @_;
@@ -123,348 +79,132 @@ sub cm_billingScheduledAdvances {
     return { amount => $sum, count => $count, items => \@items };
 }
 
-# Calculate costs for a range with known virtual start/end counters.
-sub _cm_billingCalculateCostRange {
-    my ($data, $startDate, $endDate, $startCounter, $endCounter, $startExact) = @_;
-    return undef unless ref($data) eq 'HASH';
-    return undef unless _cm_billingNumber($startCounter);
-    return undef unless _cm_billingNumber($endCounter);
-    return {
-        status       => 'invalidCounterRange',
-        startDate    => $startDate,
-        endDate      => $endDate,
-        counterStart => 0 + $startCounter,
-        counterEnd   => 0 + $endCounter,
-    } if $endCounter < $startCounter;
+sub cm_billingCalculatePhysicalPeriod {
+    my ($data, $startDate, $endDate) = @_;
+    return undef unless ref($data) eq 'HASH'
+        && defined($startDate) && $startDate =~ /^\d{4}-\d{2}-\d{2}$/;
+    return undef if defined($endDate) && $endDate !~ /^\d{4}-\d{2}-\d{2}$/;
+    my $physical = defined($endDate)
+        ? cm_counterHistoryCalculateRange($data, $startDate, $endDate)
+        : cm_counterHistoryCalculateCurrent($data, $startDate);
+    return { status => 'incomplete', error => 'missingPhysicalReadings' }
+        unless ref($physical) eq 'HASH';
 
-    my $firstTariff = cm_tariffFind($data, $startDate);
-    return { status => 'noTariff', startDate => $startDate, endDate => $endDate }
-        unless defined $firstTariff;
-
-    my @changes = sort {
-        ($a->{validFrom} // '') cmp ($b->{validFrom} // '')
-    } grep {
-        ref($_) eq 'HASH'
-        && defined($_->{validFrom})
-        && $_->{validFrom} gt $startDate
-        && $_->{validFrom} le $endDate
-    } @{ $data->{tariffs} // [] };
-
-    my @segments;
-    my $segmentStartDate    = $startDate;
-    my $segmentStartCounter = 0 + $startCounter;
-    my $segmentTariff       = $firstTariff;
-    my $exact               = $startExact ? 1 : 0;
-
-    for my $tariff (@changes) {
-        my $snapshot = $tariff->{counterSnapshot};
-        return {
-            status     => 'incomplete',
-            error      => 'missingTariffSnapshot',
-            tariffDate => $tariff->{validFrom},
-            startDate  => $startDate,
-            endDate    => $endDate,
-        } unless _cm_billingNumber($snapshot);
-
-        return {
-            status     => 'incomplete',
-            error      => 'inexactTariffSnapshot',
-            tariffDate => $tariff->{validFrom},
-            snapshotDate => $tariff->{counterSnapshotDate} // '',
-            startDate  => $startDate,
-            endDate    => $endDate,
-        } unless $tariff->{counterSnapshotExact};
-
-        my $segmentEndDate = cm_dateSubtractDay($tariff->{validFrom});
-        my $segment = _cm_billingBuildSegment(
-            $segmentTariff,
-            $segmentStartDate,
-            $segmentEndDate,
-            $segmentStartCounter,
-            $snapshot
-        );
-        return undef unless defined $segment;
-        push @segments, $segment;
-
-        $segmentStartDate    = $tariff->{validFrom};
-        $segmentStartCounter = 0 + $snapshot;
-        $segmentTariff       = $tariff;
+    my $endDay = $physical->{endDate};
+    my @tariffStarts = sort map { $_->{validFrom} }
+        grep { ref($_) eq 'HASH'
+            && defined($_->{validFrom})
+            && $_->{validFrom} gt $startDate
+            && (defined($endDate)
+                ? $_->{validFrom} lt $endDay
+                : $_->{validFrom} le $endDay)
+        } @{ $data->{tariffs} // [] };
+    # Two tariff definitions with the same start date would otherwise
+    # produce a zero-length interval and ambiguous billing.
+    for my $i (1 .. $#tariffStarts) {
+        return { status => 'incomplete', error => 'duplicateTariffBoundary',
+                 boundary => $tariffStarts[$i] }
+            if $tariffStarts[$i] eq $tariffStarts[$i-1];
     }
+    my @dates = ($startDate, @tariffStarts);
+    my @results;
+    my ($usage, $billed, $workTotal, $baseTotal,
+        $surfaceUsageTotal, $surfaceRecurringTotal) = (0, 0, 0, 0, 0, 0);
 
-    my $last = _cm_billingBuildSegment(
-        $segmentTariff,
-        $segmentStartDate,
-        $endDate,
-        $segmentStartCounter,
-        $endCounter
-    );
-    return undef unless defined $last;
-    push @segments, $last;
+    for my $i (0 .. $#dates) {
+        my $from = $dates[$i];
+        my $to = $i < $#dates ? $dates[$i+1] : undef;
+        my $segment = $i == 0 && !defined($to)
+            ? $physical
+            : defined($to)
+                ? cm_counterHistoryCalculateRange($data, $from, $to)
+                : defined($endDate)
+                    ? cm_counterHistoryCalculateRange($data, $from, $endDate)
+                    : cm_counterHistoryCalculateCurrent($data, $from);
+        return { status => 'incomplete', error => 'missingPhysicalTariffBoundary',
+                 boundary => $from }
+            unless ref($segment) eq 'HASH';
 
-    my ($counterTotal, $billingTotal, $workTotal, $baseTotal, $surfaceUsageTotal, $surfaceRecurringTotal, $costTotal) = (0, 0, 0, 0, 0, 0, 0);
-    for my $segment (@segments) {
-        $counterTotal          += $segment->{counterConsumption};
-        $billingTotal          += $segment->{billingConsumption};
-        $workTotal             += $segment->{workCost};
-        $baseTotal             += $segment->{baseCost};
-        $surfaceUsageTotal     += $segment->{surfaceUsageCost} // 0;
-        $surfaceRecurringTotal += $segment->{surfaceRecurringCost} // 0;
-        $costTotal             += $segment->{totalCost};
+        my $tariff = cm_tariffFind($data, $from);
+        return { status => 'noTariff', startDate => $from }
+            unless ref($tariff) eq 'HASH';
+        my $converted = cm_tariffConvert($segment->{consumption}, $tariff);
+        return undef unless defined $converted;
+
+        # The interval end is exclusive for a completed physical boundary.
+        # For a live reading, the current calendar day is included.
+        my $days = defined($to) ? cm_dateDiffDays($from, $to)
+            : defined($endDate) ? cm_dateDiffDays($from, $endDate)
+            : cm_dateDiffDays($from, $endDay) + 1;
+        return undef unless defined($days) && $days >= 0;
+        my $work = $converted * ($tariff->{workPrice} // 0);
+        my $base = _cm_billingBaseForDays($tariff, $days, $from);
+        my $surfaceUsage = _cm_billingAnnualAreaForDays(
+            $tariff->{surfaceUsageArea} // 0,
+            $tariff->{surfaceUsagePrice} // 0, $days, $from);
+        my $surfaceRecurring = _cm_billingAnnualAreaForDays(
+            $tariff->{surfaceRecurringArea} // 0,
+            $tariff->{surfaceRecurringPrice} // 0, $days, $from);
+        return undef unless defined($base)
+            && defined($surfaceUsage) && defined($surfaceRecurring);
+
+        push @results, {
+            startDate => $from, endDate => $to // $endDay,
+            days => $days,
+            counterConsumption => $segment->{consumption},
+            billingConsumption => $converted,
+            workCost => $work, baseCost => $base,
+            surfaceUsageCost => $surfaceUsage,
+            surfaceRecurringCost => $surfaceRecurring,
+            totalCost => $work + $base + $surfaceUsage + $surfaceRecurring,
+            tariffId => $tariff->{id},
+            physicalSegments => $segment->{segments},
+        };
+        $usage += $segment->{consumption};
+        $billed += $converted;
+        $workTotal += $work;
+        $baseTotal += $base;
+        $surfaceUsageTotal += $surfaceUsage;
+        $surfaceRecurringTotal += $surfaceRecurring;
     }
-
-    my $surfaceTotal = $surfaceUsageTotal + $surfaceRecurringTotal;
-
     return {
-        status             => 'active',
-        exact              => $exact,
-        startDate          => $startDate,
-        endDate            => $endDate,
-        counterStart       => 0 + $startCounter,
-        counterEnd         => 0 + $endCounter,
-        counterConsumption => $counterTotal,
-        billingConsumption => $billingTotal,
-        workCost           => $workTotal,
-        baseCost              => $baseTotal,
-        surfaceUsageCost      => $surfaceUsageTotal,
-        surfaceRecurringCost  => $surfaceRecurringTotal,
-        surfaceCost           => $surfaceTotal,
-        totalCost             => $costTotal,
-        unitCounter        => $firstTariff->{unitCounter} // '',
-        unitBilling        => $firstTariff->{unitBilling} // '',
-        currency           => $firstTariff->{currency} // ($data->{settings}{currency} // 'EUR'),
-        segments           => \@segments,
+        status => 'active', source => 'physicalReadings',
+        startDate => $startDate, endDate => $endDay,
+        counterConsumption => $usage,
+        billingConsumption => $billed,
+        workCost => $workTotal, baseCost => $baseTotal,
+        surfaceUsageCost => $surfaceUsageTotal,
+        surfaceRecurringCost => $surfaceRecurringTotal,
+        surfaceCost => $surfaceUsageTotal + $surfaceRecurringTotal,
+        totalCost => $workTotal + $baseTotal
+            + $surfaceUsageTotal + $surfaceRecurringTotal,
+        segments => \@results,
     };
 }
 
-sub _cm_billingBuildSegment {
-    my ($tariff, $startDate, $endDate, $startCounter, $endCounter) = @_;
-    return undef unless ref($tariff) eq 'HASH';
-    return undef if $endCounter < $startCounter;
-
-    my $days = cm_dateDiffDays($startDate, $endDate);
-    return undef unless defined $days;
-    $days++;
-
-    my $counterConsumption = $endCounter - $startCounter;
-    my $billingConsumption = cm_tariffConvert($counterConsumption, $tariff);
-    return undef unless defined $billingConsumption;
-
-    my $work = $billingConsumption * ($tariff->{workPrice} // 0);
-    my $base = _cm_billingBaseForDays($tariff, $days, $startDate);
-    return undef unless defined $base;
-
-    my $surfaceUsage = _cm_billingAnnualAreaForDays(
-        $tariff->{surfaceUsageArea} // 0,
-        $tariff->{surfaceUsagePrice} // 0,
-        $days,
-        $startDate
-    );
-    return undef unless defined $surfaceUsage;
-
-    my $surfaceRecurring = _cm_billingAnnualAreaForDays(
-        $tariff->{surfaceRecurringArea} // 0,
-        $tariff->{surfaceRecurringPrice} // 0,
-        $days,
-        $startDate
-    );
-    return undef unless defined $surfaceRecurring;
-
-    my $surface = $surfaceUsage + $surfaceRecurring;
-
-    return {
-        startDate          => $startDate,
-        endDate            => $endDate,
-        days               => $days,
-        counterStart       => 0 + $startCounter,
-        counterEnd         => 0 + $endCounter,
-        counterConsumption => $counterConsumption,
-        billingConsumption => $billingConsumption,
-        workCost           => $work,
-        baseCost              => $base,
-        surfaceUsageCost      => $surfaceUsage,
-        surfaceRecurringCost  => $surfaceRecurring,
-        surfaceCost           => $surface,
-        totalCost             => $work + $base + $surface,
-        tariffId           => $tariff->{id},
-        workPrice          => $tariff->{workPrice} // 0,
-        basePrice          => $tariff->{basePrice} // 0,
-        basePriceUnit      => $tariff->{basePriceUnit} // '',
-        calorificValue     => $tariff->{calorificValue} // 1,
-        stateNumber        => $tariff->{stateNumber} // 1,
-        assessmentFactor       => $tariff->{assessmentFactor} // 1,
-        surfaceUsageArea       => $tariff->{surfaceUsageArea} // 0,
-        surfaceUsagePrice      => $tariff->{surfaceUsagePrice} // 0,
-        surfaceRecurringArea   => $tariff->{surfaceRecurringArea} // 0,
-        surfaceRecurringPrice  => $tariff->{surfaceRecurringPrice} // 0,
-    };
-}
-
-# Current day/month/year cost calculation. Day and month use the exact current
-# aggregate to infer the virtual start counter. Year uses the yearly baseline.
-sub cm_billingCalculatePeriod {
-    my ($data, $period, $asOfDate) = @_;
-    return undef unless ref($data) eq 'HASH';
-    $asOfDate = cm_today() unless defined $asOfDate && $asOfDate ne '';
-    return undef unless defined cm_dateCompare($asOfDate, $asOfDate);
-
-    return cm_billingCalculate($data, $asOfDate) if ($period // '') eq 'year';
-
-    return { status => 'noCounter' }
-        unless _cm_billingNumber($data->{meter}{current});
-
-    my $currentVirtual = $data->{meter}{virtual};
-    $currentVirtual = $data->{meter}{current}
-        unless _cm_billingNumber($currentVirtual);
-
-    my ($year, $month) = $asOfDate =~ /^(\d{4})-(\d{2})-/;
-    my ($startDate, $consumption);
-
-    if (($period // '') eq 'today') {
-        $startDate   = $asOfDate;
-        $consumption = cm_consumptionToday($data);
-    }
-    elsif (($period // '') eq 'month') {
-        my $monthKey = "$year-$month";
-        $startDate   = $monthKey . '-01';
-        $consumption = cm_consumptionMonth($data);
-    }
-    else {
-        return undef;
-    }
-
-    return undef unless _cm_billingNumber($consumption);
-    my $startCounter = $currentVirtual - $consumption;
-    return undef if $startCounter < 0;
-
-    my $result = _cm_billingCalculateCostRange(
-        $data,
-        $startDate,
-        $asOfDate,
-        $startCounter,
-        $currentVirtual,
-        1
-    );
-    $result->{period} = $period if ref($result) eq 'HASH';
-    return $result;
-}
-
-
-###############################################################################
-# Calculate one completed previous period from the compact consumption state.
-# No history is stored: the current period baseline is also the exact end
-# counter of the immediately preceding period.
-###############################################################################
-
-sub cm_billingCalculatePreviousPeriod {
-    my ($data, $period) = @_;
-    return undef unless ref($data) eq 'HASH';
-
-    my $c = $data->{consumption} // {};
-    my ($startDate, $endDate, $endCounter, $counterConsumption);
-
-    if (($period // '') eq 'yesterday') {
-        return undef unless defined($c->{dayKey}) && $c->{dayKey} ne '';
-        return undef unless _cm_billingNumber($c->{dayBaseline});
-        return undef unless _cm_billingNumber($c->{yesterday});
-
-        $endDate = cm_dateSubtractDay($c->{dayKey});
-        return undef unless defined $endDate;
-        $startDate          = $endDate;
-        $endCounter         = 0 + $c->{dayBaseline};
-        $counterConsumption = 0 + $c->{yesterday};
-    }
-    elsif (($period // '') eq 'lastMonth') {
-        return undef unless defined($c->{monthKey}) && $c->{monthKey} =~ /^\d{4}-\d{2}$/;
-        return undef unless _cm_billingNumber($c->{monthBaseline});
-        return undef unless _cm_billingNumber($c->{lastMonthValue});
-
-        $endDate = cm_dateSubtractDay($c->{monthKey} . '-01');
-        return undef unless defined $endDate;
-        my ($previousMonth) = $endDate =~ /^(\d{4}-\d{2})-/;
-        return undef unless defined $previousMonth;
-        $startDate          = $previousMonth . '-01';
-        $endCounter         = 0 + $c->{monthBaseline};
-        $counterConsumption = 0 + $c->{lastMonthValue};
-    }
-    elsif (($period // '') eq 'lastYear') {
-        return undef unless defined($c->{yearKey}) && $c->{yearKey} =~ /^\d{4}$/;
-        return undef unless _cm_billingNumber($c->{yearBaseline});
-        return undef unless _cm_billingNumber($c->{lastYearValue});
-
-        my $previousYear = (0 + $c->{yearKey}) - 1;
-        $startDate          = sprintf('%04d-01-01', $previousYear);
-        $endDate            = sprintf('%04d-12-31', $previousYear);
-        $endCounter         = 0 + $c->{yearBaseline};
-        $counterConsumption = 0 + $c->{lastYearValue};
-    }
-    else {
-        return undef;
-    }
-
-    my $startCounter = $endCounter - $counterConsumption;
-    return undef if $startCounter < 0;
-
-    my $result = _cm_billingCalculateCostRange(
-        $data,
-        $startDate,
-        $endDate,
-        $startCounter,
-        $endCounter,
-        1
-    );
-    $result->{period} = $period if ref($result) eq 'HASH';
-    return $result;
-}
-
-sub cm_billingCalculate {
+# Current-year billing using physical meter readings and scheduled advances.
+# A missing physical boundary is an explicit incomplete result, not zero.
+sub cm_billingCalculatePhysicalYear {
     my ($data, $asOfDate) = @_;
     return undef unless ref($data) eq 'HASH';
-
-    $asOfDate = cm_today() unless defined $asOfDate && $asOfDate ne '';
+    $asOfDate = cm_today() unless defined($asOfDate) && length($asOfDate);
     return undef unless defined cm_dateCompare($asOfDate, $asOfDate);
-
+    # This API uses the latest live reading and cannot reconstruct a past date.
+    return undef unless $asOfDate eq cm_today();
     my ($year) = $asOfDate =~ /^(\d{4})-/;
-    return undef unless defined $year;
-
-    my $startDate = $year . '-01-01';
-    my $endDate   = $year . '-12-31';
-    my $effectiveEnd = cm_dateCompare($asOfDate, $endDate) > 0 ? $endDate : $asOfDate;
-
-    return { status => 'noCounter', startDate => $startDate, endDate => $endDate }
-        unless _cm_billingNumber($data->{meter}{current});
-
-    my $currentVirtual = $data->{meter}{virtual};
-    $currentVirtual = $data->{meter}{current}
-        unless _cm_billingNumber($currentVirtual);
-
-    my $baseline = _cm_billingYearBaseline($data, $year, $currentVirtual);
-    return { status => 'noBaseline', startDate => $startDate, endDate => $endDate, year => $year }
-        unless defined $baseline;
-
-    my $cost = _cm_billingCalculateCostRange(
-        $data,
-        $startDate,
-        $effectiveEnd,
-        $baseline->{counter},
-        $currentVirtual,
-        $baseline->{exact}
-    );
-    return undef unless defined $cost;
-    return $cost unless ($cost->{status} // '') eq 'active';
-
-    my $advances = cm_billingScheduledAdvances($data, $startDate, $effectiveEnd);
-    return undef unless defined $advances;
-
+    my $startDate = "$year-01-01";
+    my $result = cm_billingCalculatePhysicalPeriod($data, $startDate);
+    return $result unless ref($result) eq 'HASH'
+        && ($result->{status} // '') eq 'active';
+    my $advances = cm_billingScheduledAdvances($data, $startDate, $asOfDate);
+    return undef unless ref($advances) eq 'HASH';
     return {
-        %{$cost},
-        year             => $year,
-        endDate          => $endDate,
-        calculatedTo     => $effectiveEnd,
-        baselineCounter  => $baseline->{counter},
-        baselineSource   => $baseline->{source},
-        advanceAmount    => $advances->{amount},
-        advanceCount     => $advances->{count},
-        financialReserve => $advances->{amount} - $cost->{totalCost},
+        %$result,
+        year => $year,
+        calculatedTo => $asOfDate,
+        advanceAmount => $advances->{amount},
+        advanceCount => $advances->{count},
+        financialReserve => $advances->{amount} - $result->{totalCost},
     };
 }
 

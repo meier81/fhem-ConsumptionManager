@@ -20,8 +20,7 @@ use ConsumptionManager::Utils qw(
 
 use ConsumptionManager::Meter qw(
     cm_meterUpdate
-    cm_meterSetYearBaseline
-    cm_meterSetMonthBaseline
+    cm_meterSetBoundary
     cm_meterRegisterChange
 );
 
@@ -31,8 +30,7 @@ our @EXPORT_OK = qw(
     cm_coreSave
     cm_coreSetCounter
     cm_coreResetPower
-    cm_coreSetYearBaseline
-    cm_coreSetMonthBaseline
+    cm_coreSetBoundary
     cm_coreRegisterMeterChange
 );
 
@@ -159,44 +157,14 @@ sub cm_coreResetPower {
 }
 
 ###############################################################################
-# Store an optional monthly baseline correction
+# Store or correct a physical midnight counter boundary
 ###############################################################################
-
-sub cm_coreSetMonthBaseline {
-    my ($hash, $month, $counter) = @_;
-
+sub cm_coreSetBoundary {
+    my ($hash, $date, $counter) = @_;
     return 0 unless defined $hash;
-
     my $data = cm_storageLoad($hash);
     return 0 unless $data;
-
-    return 0 unless cm_meterSetMonthBaseline(
-        $data,
-        $month,
-        $counter
-    );
-
-    return cm_storageSave($hash, $data);
-}
-
-###############################################################################
-# Store an optional yearly baseline correction
-###############################################################################
-
-sub cm_coreSetYearBaseline {
-    my ($hash, $year, $counter) = @_;
-
-    return 0 unless defined $hash;
-
-    my $data = cm_storageLoad($hash);
-    return 0 unless $data;
-
-    return 0 unless cm_meterSetYearBaseline(
-        $data,
-        $year,
-        $counter
-    );
-
+    return 0 unless cm_meterSetBoundary($data, $date, $counter);
     return cm_storageSave($hash, $data);
 }
 
@@ -205,7 +173,7 @@ sub cm_coreSetYearBaseline {
 ###############################################################################
 
 sub cm_coreRegisterMeterChange {
-    my ($hash, $date, $oldCounter, $newCounter, $comment) = @_;
+    my ($hash, $date, $oldCounter, $newCounter, $comment, $effectiveAt) = @_;
 
     return 0 unless defined $hash;
 
@@ -217,7 +185,8 @@ sub cm_coreRegisterMeterChange {
         $date,
         $oldCounter,
         $newCounter,
-        $comment
+        $comment,
+        $effectiveAt
     );
 
     return cm_storageSave($hash, $data);

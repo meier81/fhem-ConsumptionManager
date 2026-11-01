@@ -25,7 +25,6 @@ our @EXPORT_OK = qw(
     cm_tariffSetValue
     cm_tariffSave
     cm_tariffCancel
-    cm_tariffCapturePendingSnapshots
 );
 
 our $VERSION = CM_VERSION;
@@ -171,6 +170,13 @@ sub cm_tariffCreate {
         ($unitCounter, $unitBilling) = ('m3', 'm3');
     }
 
+    # Use the latest tariff as a template. Physical midnight boundaries
+    # are stored separately in counterHistory.
+    my ($latest) = sort {
+        ($b->{validFrom} // '') cmp ($a->{validFrom} // '')
+    } grep { ref($_) eq 'HASH' && defined $_->{validFrom} }
+      @{ref($data->{tariffs}) eq 'ARRAY' ? $data->{tariffs} : []};
+
     $data->{tariffEditor} = {
         validFrom      => cm_today(),
         validTo        => '',
@@ -188,11 +194,16 @@ sub cm_tariffCreate {
         surfaceRecurringArea  => 0,
         surfaceRecurringPrice => 0,
         comment              => '',
-        counterSnapshot      => undef,
-        counterSnapshotDate  => '',
-        counterSnapshotSource => '',
-        counterSnapshotExact => 0,
     };
+
+    if ($latest) {
+        for my $field (qw(workPrice basePrice basePriceUnit currency
+            calorificValue stateNumber assessmentFactor surfaceUsageArea
+            surfaceUsagePrice surfaceRecurringArea surfaceRecurringPrice comment)) {
+            $data->{tariffEditor}{$field} = $latest->{$field}
+                if defined $latest->{$field};
+        }
+    }
 
     return 1;
 }
@@ -215,9 +226,8 @@ sub cm_tariffEdit {
 
         my %editor = %{$tariff};
         $editor{_editId} = 0 + $id;
-        $editor{_editOriginalValidFrom} = $tariff->{validFrom} // '';
-        $editor{_snapshotEdited} = 0;
         delete $editor{id};
+        delete @editor{qw(counterSnapshot counterSnapshotDate counterSnapshotSource counterSnapshotExact)};
         $data->{tariffEditor} = \%editor;
         return 1;
     }
@@ -253,13 +263,12 @@ sub cm_tariffSetValue {
         surfaceRecurringArea
         surfaceRecurringPrice
         comment
-        counterSnapshot
     );
 
     return 0 unless $allowed{$field};
     return 0 unless defined $value;
 
-    if ($field =~ /^(workPrice|basePrice|counterSnapshot|surfaceUsageArea|surfaceUsagePrice|surfaceRecurringArea|surfaceRecurringPrice)$/) {
+    if ($field =~ /^(workPrice|basePrice|surfaceUsageArea|surfaceUsagePrice|surfaceRecurringArea|surfaceRecurringPrice)$/) {
         return 0 unless _cm_tariffNonNegativeNumber($value);
         $value += 0;
     }
@@ -291,19 +300,6 @@ sub cm_tariffSetValue {
 
     $data->{tariffEditor}{$field} = $value;
 
-    if ($field eq 'counterSnapshot') {
-        $data->{tariffEditor}{counterSnapshotDate}   = $data->{tariffEditor}{validFrom} // '';
-        $data->{tariffEditor}{counterSnapshotSource} = 'manual';
-        $data->{tariffEditor}{counterSnapshotExact}  = 1;
-        $data->{tariffEditor}{_snapshotEdited} = 1
-            if defined $data->{tariffEditor}{_editId};
-    }
-    elsif ($field eq 'validFrom'
-        && $data->{tariffEditor}{_snapshotEdited}
-        && defined $data->{tariffEditor}{counterSnapshot}) {
-        $data->{tariffEditor}{counterSnapshotDate} = $value;
-    }
-
     return 1;
 }
 
@@ -320,8 +316,6 @@ sub cm_tariffSave {
 
     my %editor = %{$data->{tariffEditor}};
     my $editId = delete $editor{_editId};
-    my $originalValidFrom = delete $editor{_editOriginalValidFrom};
-    my $snapshotEdited = delete $editor{_snapshotEdited};
     return 0 unless cm_tariffValidate(\%editor);
 
     $data->{tariffs} = [] unless ref($data->{tariffs}) eq 'ARRAY';
@@ -345,18 +339,7 @@ sub cm_tariffSave {
             return 0 if ($entry->{validFrom} // '') eq ($editor{validFrom} // '');
         }
 
-        my $old = $data->{tariffs}[$index];
         $editor{id} = 0 + $editId;
-
-        if (($old->{validFrom} // '') ne ($editor{validFrom} // '')) {
-            unless ($snapshotEdited) {
-                $editor{counterSnapshot}       = undef;
-                $editor{counterSnapshotDate}   = '';
-                $editor{counterSnapshotSource} = '';
-                $editor{counterSnapshotExact}  = 0;
-                _cm_tariffInitializeSnapshot($data, \%editor);
-            }
-        }
 
         $data->{tariffs}[$index] = \%editor;
     }
@@ -384,7 +367,6 @@ sub cm_tariffSave {
         }
 
         $editor{id} = $nextId;
-        _cm_tariffInitializeSnapshot($data, \%editor);
         push @{$data->{tariffs}}, \%editor;
     }
 
@@ -410,117 +392,6 @@ sub cm_tariffSave {
     return 1;
 }
 
-###############################################################################
-# Capture snapshots for tariffs that became valid after they were created
-###############################################################################
-
-sub cm_tariffCapturePendingSnapshots {
-    my ($data, $snapshot) = @_;
-
-    return 0 unless ref($data) eq 'HASH';
-    return 0 unless _cm_tariffNonNegativeNumber($snapshot);
-    return 1 unless ref($data->{tariffs}) eq 'ARRAY';
-
-    my $today = cm_today();
-
-    for my $tariff (@{$data->{tariffs}}) {
-        next unless ref($tariff) eq 'HASH';
-        next unless defined $tariff->{validFrom};
-        next if $tariff->{validFrom} gt $today;
-        next if defined $tariff->{counterSnapshot};
-        next unless ($tariff->{counterSnapshotSource} // '') eq 'pending';
-
-        $tariff->{counterSnapshot}       = 0 + $snapshot;
-        $tariff->{counterSnapshotDate}   = $today;
-        $tariff->{counterSnapshotSource} = 'automatic';
-        $tariff->{counterSnapshotExact}  = $tariff->{validFrom} eq $today ? 1 : 0;
-    }
-
-    return 1;
-}
-
-###############################################################################
-# Initialize the counter snapshot of a newly saved tariff
-###############################################################################
-
-sub _cm_tariffInitializeSnapshot {
-    my ($data, $tariff) = @_;
-
-    return 0 unless ref($data) eq 'HASH';
-    return 0 unless ref($tariff) eq 'HASH';
-
-    my $manualSnapshot = $tariff->{counterSnapshot};
-
-    if (_cm_tariffNonNegativeNumber($manualSnapshot)) {
-        $tariff->{counterSnapshot}       = 0 + $manualSnapshot;
-        $tariff->{counterSnapshotDate}   = $tariff->{validFrom} // '';
-        $tariff->{counterSnapshotSource} = 'manual';
-        $tariff->{counterSnapshotExact}  = 1;
-        return 1;
-    }
-
-    $tariff->{counterSnapshot}       = undef;
-    $tariff->{counterSnapshotDate}   = '';
-    $tariff->{counterSnapshotSource} = 'pending';
-    $tariff->{counterSnapshotExact}  = 0;
-
-    my $validFrom = $tariff->{validFrom};
-    return 1 unless defined $validFrom;
-
-    my $today = cm_today();
-    return 1 if $validFrom gt $today;
-
-    my $baseline = _cm_tariffBaselineSnapshot($data, $validFrom);
-
-    if (defined $baseline) {
-        $tariff->{counterSnapshot}       = $baseline;
-        $tariff->{counterSnapshotDate}   = $validFrom;
-        $tariff->{counterSnapshotSource} = 'yearBaseline';
-        $tariff->{counterSnapshotExact}  = 1;
-        return 1;
-    }
-
-    my $virtual = _cm_tariffCurrentVirtualCounter($data);
-    return 1 unless defined $virtual;
-
-    $tariff->{counterSnapshot}       = $virtual;
-    $tariff->{counterSnapshotDate}   = $today;
-    $tariff->{counterSnapshotSource} = 'currentCounter';
-    $tariff->{counterSnapshotExact}  = $validFrom eq $today ? 1 : 0;
-
-    return 1;
-}
-
-sub _cm_tariffCurrentVirtualCounter {
-    my ($data) = @_;
-
-    return undef unless ref($data) eq 'HASH';
-    return undef unless ref($data->{meter}) eq 'HASH';
-
-    return undef unless _cm_tariffNonNegativeNumber($data->{meter}{current});
-
-    return 0 + $data->{meter}{virtual}
-        if _cm_tariffNonNegativeNumber($data->{meter}{virtual});
-
-    return 0 + $data->{meter}{current} + ($data->{meter}{offset} // 0);
-}
-
-sub _cm_tariffBaselineSnapshot {
-    my ($data, $date) = @_;
-
-    return undef unless defined $date;
-    return undef unless $date =~ /^(\d{4})-01-01$/;
-    return undef unless ref($data->{consumption}) eq 'HASH';
-    return undef unless ($data->{consumption}{yearKey} // '') eq $1;
-
-    my $snapshot = $data->{consumption}{yearBaseline};
-    return undef unless _cm_tariffNonNegativeNumber($snapshot);
-
-    return 0 + $snapshot;
-}
-
-###############################################################################
-# Cancel tariff editor
 ###############################################################################
 
 sub cm_tariffCancel {

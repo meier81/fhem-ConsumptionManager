@@ -1,3 +1,14 @@
+## 1.0.0 - 2026-11-01
+
+- Erste stabile Veröffentlichung des ConsumptionManager für Strom, Gas, Wasser und Abwasser.
+- Verbrauchs- und Kostenberechnung für Tages-, Monats- und Jahreszeiträume.
+- Physische Zählerhistorie und Zählerwechsel, inklusive virtueller Zählerfortführung.
+- Tarif- und Abschlagsverwaltung in FHEMWEB, einschließlich deutscher Dezimaleingaben.
+- Gas-Energieumrechnung und eigenständige Abwasserberechnung mit Flächengebühren.
+- Praxistests: Monatswechsel für alle vier Medien und Neustart mit erhaltenen Daten.
+- Datenbankschema bleibt Version 15; keine automatische Rückmigration auf ältere Modulstände.
+- Keine FHEM-Control-Datei und keine Entwicklungs- oder Testverzeichnisse im Release-Branch.
+
 # Changelog
 
 ## 0.5.4
