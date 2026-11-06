@@ -24,6 +24,7 @@ our @EXPORT_OK = qw(
     cm_billingScheduledAdvances
     cm_billingCalculatePhysicalPeriod
     cm_billingCalculatePhysicalYear
+    cm_billingCalculatePhysicalBillingYear
 );
 
 our $VERSION = CM_VERSION;
@@ -201,6 +202,33 @@ sub cm_billingCalculatePhysicalYear {
     return {
         %$result,
         year => $year,
+        calculatedTo => $asOfDate,
+        advanceAmount => $advances->{amount},
+        advanceCount => $advances->{count},
+        financialReserve => $advances->{amount} - $result->{totalCost},
+    };
+}
+
+# Current custom billing year, beginning on day one of the selected month.
+sub cm_billingCalculatePhysicalBillingYear {
+    my ($data, $startMonth, $asOfDate) = @_;
+    return undef unless ref($data) eq 'HASH';
+    $startMonth = '01' unless defined($startMonth) && length($startMonth);
+    return undef unless $startMonth =~ /^(?:0[1-9]|1[0-2])$/;
+    $asOfDate = cm_today() unless defined($asOfDate) && length($asOfDate);
+    return undef unless defined cm_dateCompare($asOfDate, $asOfDate);
+    return undef unless $asOfDate eq cm_today();
+    my ($year, $month) = $asOfDate =~ /^(\d{4})-(\d{2})-/;
+    my $startYear = $year - ($month < $startMonth ? 1 : 0);
+    my $startDate = sprintf('%04d-%s-01', $startYear, $startMonth);
+    my $result = cm_billingCalculatePhysicalPeriod($data, $startDate);
+    return $result unless ref($result) eq 'HASH'
+        && ($result->{status} // '') eq 'active';
+    my $advances = cm_billingScheduledAdvances($data, $startDate, $asOfDate);
+    return undef unless ref($advances) eq 'HASH';
+    return {
+        %$result,
+        startDate => $startDate,
         calculatedTo => $asOfDate,
         advanceAmount => $advances->{amount},
         advanceCount => $advances->{count},
