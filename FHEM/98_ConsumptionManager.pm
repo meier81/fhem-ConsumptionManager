@@ -1455,7 +1455,8 @@ sub ConsumptionManager_UpdateReadings {
     # Completed periods use an exclusive end boundary, as the calendar periods do.
     my $billingMonth = AttrVal($hash->{NAME}, 'billingYearStart', '01');
     $billingMonth = '01' unless $billingMonth =~ /^(?:0[1-9]|1[0-2])$/;
-    my $billingStartYear = $yearKey - (($monthKey =~ /-(\d\d)$/)[0] < $billingMonth ? 1 : 0);
+    my $currentMonth = substr($monthKey, 5, 2);
+    my $billingStartYear = $yearKey - ($currentMonth < $billingMonth ? 1 : 0);
     my $billingStart = sprintf('%04d-%s-01', $billingStartYear, $billingMonth);
     my $previousBillingStart = sprintf('%04d-%s-01', $billingStartYear - 1, $billingMonth);
     push @periods,
