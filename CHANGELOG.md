@@ -1,3 +1,10 @@
+## 1.1.0-dev1 - in Entwicklung
+
+- Neues Attribut `billingYearStart` (01 bis 12; Standard 01).
+- Verbrauchs- und Kostenreadings für laufendes und vorheriges Abrechnungsjahr.
+- Kalenderjahr-Auswertungen bleiben unverändert.
+- Noch offen: Overview, Abrechnungsausgabe und vollständige Tests.
+
 ## 1.0.0 - 2026-11-01
 
 - Erste stabile Veröffentlichung des ConsumptionManager für Strom, Gas, Wasser und Abwasser.
