@@ -3,7 +3,9 @@
 - Neues Attribut `billingYearStart` (01 bis 12; Standard 01).
 - Verbrauchs- und Kostenreadings für laufendes und vorheriges Abrechnungsjahr.
 - Kalenderjahr-Auswertungen bleiben unverändert.
-- Noch offen: Overview, Abrechnungsausgabe und vollständige Tests.
+- `get billing` und `get overview` zeigen die Abrechnung seit dem gewählten Abrechnungsbeginn einschließlich Abschlägen und Finanzreserve.
+- `get cost` ergänzt das aktuelle und vorherige Abrechnungsjahr.
+- Noch offen: vollständige automatisierte Tests und FHEM-Praxistest.
 
 ## 1.0.0 - 2026-11-01
 
