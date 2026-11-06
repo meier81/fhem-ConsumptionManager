@@ -1006,9 +1006,13 @@ sub ConsumptionManager_Attr(@)
 
     return undef unless defined $hash;
 
-    if ($attrName eq 'billingYearStart' && $cmd eq 'set') {
-        return 'billingYearStart must be 01 through 12'
-            unless defined($attrValue) && $attrValue =~ /^(?:0[1-9]|1[0-2])$/;
+    if ($attrName eq 'billingYearStart') {
+        if ($cmd eq 'set') {
+            return 'billingYearStart must be 01 through 12'
+                unless defined($attrValue) && $attrValue =~ /^(?:0[1-9]|1[0-2])$/;
+        }
+        ConsumptionManager_UpdateReadings($hash, undef, undef, undef,
+            $cmd eq 'set' ? $attrValue : '01');
     }
 
     if ($attrName eq 'powerUnit') {
@@ -1361,7 +1365,7 @@ sub ConsumptionManager_DisplayUnit {
 }
 
 sub ConsumptionManager_UpdateReadings {
-    my ($hash, $unitOverride, $powerUnitOverride, $flowUnitOverride) = @_;
+    my ($hash, $unitOverride, $powerUnitOverride, $flowUnitOverride, $billingMonthOverride) = @_;
     my $flowUnit = defined($flowUnitOverride) ? $flowUnitOverride
         : AttrVal($hash->{NAME}, 'flowUnit', 'm3/h');
     my $flowFactor = $flowUnit eq 'l/h' ? 1000 : 1;
@@ -1462,7 +1466,8 @@ sub ConsumptionManager_UpdateReadings {
     );
     # The billing year begins on the first day of the selected month.
     # Completed periods use an exclusive end boundary, as the calendar periods do.
-    my $billingMonth = AttrVal($hash->{NAME}, 'billingYearStart', '01');
+    my $billingMonth = defined($billingMonthOverride) ? $billingMonthOverride
+        : AttrVal($hash->{NAME}, 'billingYearStart', '01');
     $billingMonth = '01' unless $billingMonth =~ /^(?:0[1-9]|1[0-2])$/;
     my $currentMonth = substr($monthKey, 5, 2);
     my $billingStartYear = $yearKey - ($currentMonth < $billingMonth ? 1 : 0);
