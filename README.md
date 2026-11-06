@@ -33,4 +33,4 @@ Weitere Änderungen siehe [CHANGELOG.md](CHANGELOG.md).
 
 ## Entwicklung 1.1.0-dev1: Abrechnungsjahr
 
-Mit `attr <Device> billingYearStart 05` beginnt das Abrechnungsjahr am 1. Mai und endet am 30. April des Folgejahres. Erlaubt sind die Monatswerte `01` bis `12`; ohne Attribut gilt `01`. Die Kalenderjahr-Readings bleiben erhalten. Ergänzt werden `consumptionBillingYear`, `consumptionLastBillingYear`, `costBillingYear` und `costLastBillingYear`. Diese DEV-Fassung ist noch nicht vollständig getestet; die Erweiterung von `get overview` und der Abrechnungsausgabe steht noch aus.
+Mit `attr <Device> billingYearStart 05` beginnt das Abrechnungsjahr am 1. Mai und endet am 30. April des Folgejahres. Erlaubt sind die Monatswerte `01` bis `12`; ohne Attribut gilt `01`. Die Kalenderjahr-Readings bleiben erhalten. Ergänzt werden `consumptionBillingYear`, `consumptionLastBillingYear`, `costBillingYear` und `costLastBillingYear`. Diese DEV-Fassung ist noch nicht vollständig getestet; `get overview` und `get billing` verwenden den gewählten Abrechnungsbeginn; `get cost` zeigt beide Abrechnungsjahre. Der vollständige FHEM-Praxistest steht noch aus.
