@@ -115,6 +115,7 @@ sub ConsumptionManager_Initialize($)
         . ' counterReading'
         . ' counterMultiplier'
         . ' consumptionDecimals'
+        . ' billingYearStart:01,02,03,04,05,06,07,08,09,10,11,12'
         . ' dailyHistoryDays'
         . ' monthlyHistoryMonths'
         . ' yearlyHistoryYears'
@@ -996,6 +997,11 @@ sub ConsumptionManager_Attr(@)
 
     return undef unless defined $hash;
 
+    if ($attrName eq 'billingYearStart' && $cmd eq 'set') {
+        return 'billingYearStart must be 01 through 12'
+            unless defined($attrValue) && $attrValue =~ /^(?:0[1-9]|1[0-2])$/;
+    }
+
     if ($attrName eq 'powerUnit') {
         return "powerUnit is only available for electricity and gas"
             unless ($hash->{MEDIUM} // '') =~ /^(?:electricity|gas)$/;
@@ -1445,6 +1451,16 @@ sub ConsumptionManager_UpdateReadings {
         [ 'Year',      "$yearKey-01-01",   undef ],
         [ 'LastYear',  $lastYearStart,     "$yearKey-01-01" ],
     );
+    # The billing year begins on the first day of the selected month.
+    # Completed periods use an exclusive end boundary, as the calendar periods do.
+    my $billingMonth = AttrVal($hash->{NAME}, 'billingYearStart', '01');
+    $billingMonth = '01' unless $billingMonth =~ /^(?:0[1-9]|1[0-2])$/;
+    my $billingStartYear = $yearKey - (($monthKey =~ /-(\d\d)$/)[0] < $billingMonth ? 1 : 0);
+    my $billingStart = sprintf('%04d-%s-01', $billingStartYear, $billingMonth);
+    my $previousBillingStart = sprintf('%04d-%s-01', $billingStartYear - 1, $billingMonth);
+    push @periods,
+        [ 'BillingYear', $billingStart, undef ],
+        [ 'LastBillingYear', $previousBillingStart, $billingStart ];
     my %physicalResults;
     for my $period (@periods) {
         my ($label, $start, $end) = @$period;
