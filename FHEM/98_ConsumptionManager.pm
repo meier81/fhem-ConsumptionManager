@@ -65,6 +65,7 @@ use ConsumptionManager::Advance qw(
 use ConsumptionManager::Billing qw(
     cm_billingCalculatePhysicalPeriod
     cm_billingCalculatePhysicalYear
+    cm_billingCalculatePhysicalBillingYear
 );
 
 use ConsumptionManager::Utils qw(
@@ -841,16 +842,17 @@ sub ConsumptionManager_Get($@)
     # Calendar-year billing
     ###############################################################################
 
-    if ($cmd eq "billing") {
+    if ($cmd eq "billing" || $cmd eq "overview") {
         my $data = cm_coreLoad($hash);
         return "Unable to load storage" unless $data;
         ConsumptionManager_SyncWastewaterBaselines($hash, $data);
-        my $result = cm_billingCalculatePhysicalYear($data);
+        my $billingMonth = AttrVal($hash->{NAME}, 'billingYearStart', '01');
+        my $result = cm_billingCalculatePhysicalBillingYear($data, $billingMonth);
         return "Unable to calculate physical billing" unless ref($result) eq 'HASH';
         return "Physical billing incomplete: " . ($result->{error} // $result->{status} // 'unknown')
             unless ($result->{status} // '') eq 'active';
         my $currency = $data->{settings}{currency} // 'EUR';
-        my $text = "Calendar-year physical billing\n";
+        my $text = "Physical billing year (start month $billingMonth)\n";
         $text .= "==============================\n";
         $text .= sprintf("Period: %s - %s\n", $result->{startDate}, $result->{calculatedTo});
         $text .= sprintf("Meter consumption: %.4f\n", $result->{counterConsumption});
@@ -891,6 +893,13 @@ sub ConsumptionManager_Get($@)
             [ 'Year', "$year-01-01", undef ],
             [ 'Last year', ($year - 1) . '-01-01', "$year-01-01" ],
         );
+        my $billingMonth = AttrVal($hash->{NAME}, 'billingYearStart', '01');
+        $billingMonth = '01' unless $billingMonth =~ /^(?:0[1-9]|1[0-2])$/;
+        my $billingStartYear = $year - (substr($month, 5, 2) < $billingMonth ? 1 : 0);
+        my $billingStart = sprintf('%04d-%s-01', $billingStartYear, $billingMonth);
+        my $previousBillingStart = sprintf('%04d-%s-01', $billingStartYear - 1, $billingMonth);
+        push @periods, [ 'Billing year', $billingStart, undef ],
+            [ 'Last billing year', $previousBillingStart, $billingStart ];
         my $currency = $data->{settings}{currency} // 'EUR';
         my $text = "Physical costs\n==============================\n";
         for my $period (@periods) {
@@ -914,7 +923,7 @@ sub ConsumptionManager_Get($@)
         return $text;
     }
 
-    return "Unknown argument $cmd, choose one of advance advanceHistory billing cost counterHistory meterChanges tariff tariffHistory";
+    return "Unknown argument $cmd, choose one of advance advanceHistory billing overview cost counterHistory meterChanges tariff tariffHistory";
 }
 
 ###############################################################################
