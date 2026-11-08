@@ -2083,6 +2083,32 @@ sub ConsumptionManager_FWAdvanceForm {
     return $html;
 }
 
+sub ConsumptionManager_FWCounterForm {
+    my ($hash, $entry) = @_;
+    my $name = ConsumptionManager_FWHtml($hash->{NAME});
+    my $date = ref($entry) eq 'HASH' ? ($entry->{date} // '') : '';
+    my $counter = ref($entry) eq 'HASH' ? ($entry->{counter} // '') : '';
+    my $editing = length($date);
+    my $html = '<form method="get" action="" onsubmit="return cmCounterSubmit(this)">';
+    $html .= '<input type="hidden" name="detail" value="' . $name . '">'
+        . '<input type="hidden" name="cmd" value="">'
+        . '<input type="hidden" class="cmCounterDevice" value="' . $name . '">';
+    $html .= '<input type="hidden" name="fwcsrf" value="'
+        . ConsumptionManager_FWHtml(ConsumptionManager_FWCsrfValue($FW_CSRF)) . '">'
+        if defined $FW_CSRF && length $FW_CSRF;
+    $html .= '<table class="block">'
+        . '<tr><td>Stichtag</td><td><input data-cm-counter-date type="date" required'
+        . ($editing ? ' readonly' : '')
+        . ' value="' . ConsumptionManager_FWHtml($date) . '"></td></tr>'
+        . '<tr><td>Zählerstand</td><td><input data-cm-counter-value type="number"'
+        . ' min="0" step="any" required value="'
+        . ConsumptionManager_FWHtml($counter) . '"></td></tr></table>'
+        . '<button type="submit">Zählerstand speichern</button> '
+        . '<button type="button" onclick="this.closest(\'div\').style.display=\'none\'">Abbrechen</button>'
+        . '</form>';
+    return $html;
+}
+
 sub ConsumptionManager_FWDetail {
     my ($FW_wname, $name, $room, $pageHash) = @_;
     my $hash = $defs{$name};
@@ -2239,8 +2265,9 @@ CM_ADVANCE_SCRIPT
         $html .= '<p>Kein verbundenes Wassergerät verfügbar. '
             . 'Die bisher gespeicherten Werte bleiben unverändert.</p>';
     }
+    my $canManageHistory = ($hash->{MEDIUM} // '') ne 'wastewater';
     $html .= '<table class="block wide"><tr><th>Stichtag</th><th>Zählerstand</th>'
-        . '<th>Abgelesen</th><th>Erfasst</th><th>Quelle</th></tr>';
+        . '<th>Abgelesen</th><th>Erfasst</th><th>Quelle</th><th>Geschützt</th><th>Aktion</th></tr>';
     my @history = sort {
         ($b->{boundary} // $b->{date} // '') cmp ($a->{boundary} // $a->{date} // '')
     } grep { ref($_) eq 'HASH' } @{
@@ -2248,6 +2275,8 @@ CM_ADVANCE_SCRIPT
             ? $historyData->{counterHistory} : []
     };
     for my $entry (@history) {
+        my $date = $entry->{date} // '';
+        my $manual = ($entry->{source} // '') eq 'manual';
         $html .= '<tr>';
         for my $field ('boundary', 'counter', 'observedAt', 'capturedAt', 'source') {
             my $value = $field eq 'boundary'
@@ -2255,11 +2284,38 @@ CM_ADVANCE_SCRIPT
                 : ($entry->{$field} // '');
             $html .= '<td>' . ConsumptionManager_FWHtml($value) . '</td>';
         }
-        $html .= '</tr>';
+        if ($canManageHistory && $date =~ /^\d{4}-\d{2}-\d{2}$/) {
+            $html .= '<td><input type="checkbox"'
+                . ($entry->{protected} ? ' checked' : '')
+                . ' onchange="cmCounterProtect(this,\''
+                . ConsumptionManager_FWHtml($name) . '\',\''
+                . ConsumptionManager_FWHtml($date) . '\')"></td>';
+            if ($manual) {
+                my $editId = 'cmCounterEdit_' . $date;
+                $html .= '<td><button type="button" onclick="cmTariffToggle(\''
+                    . $editId . '\')">Bearbeiten</button> '
+                    . '<button type="button" onclick="cmCounterDelete(\''
+                    . ConsumptionManager_FWHtml($name) . '\',\''
+                    . ConsumptionManager_FWHtml($date) . '\')">Löschen</button></td></tr>';
+                $html .= '<tr id="' . $editId
+                    . '" style="display:none"><td colspan="7">'
+                    . ConsumptionManager_FWCounterForm($hash, $entry) . '</td></tr>';
+            } else {
+                $html .= '<td>Automatisch</td></tr>';
+            }
+        } else {
+            $html .= '<td>–</td><td>–</td></tr>';
+        }
     }
-    $html .= '<tr><td colspan="5">Noch keine Stichtagswerte vorhanden.</td></tr>'
+    $html .= '<tr><td colspan="7">Noch keine Stichtagswerte vorhanden.</td></tr>'
         unless @history;
     $html .= '</table>';
+    if ($canManageHistory) {
+        $html .= '<p><button type="button" onclick="cmTariffToggle(\'cmCounterNew\')">'
+            . 'Neuen Zählerstand anlegen</button></p>';
+        $html .= '<div id="cmCounterNew" style="display:none">'
+            . ConsumptionManager_FWCounterForm($hash, undef) . '</div>';
+    }
     $html .= '<h4>Zählerwechsel</h4>';
     my @changes = sort {
         ($b->{date} // '') cmp ($a->{date} // '')
@@ -2378,6 +2434,42 @@ function cmMeterNewToggle(id) {
         if (timeField) timeField.value = pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
     }
     cmTariffToggle(id);
+}
+function cmCounterSubmit(form) {
+    var device = form.querySelector('.cmCounterDevice').value;
+    var date = form.querySelector('[data-cm-counter-date]').value;
+    var value = form.querySelector('[data-cm-counter-value]').value;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d+(?:\.\d+)?$/.test(value)) {
+        alert('Bitte gültigen Stichtag und Zählerstand eingeben.');
+        return false;
+    }
+    form.elements.cmd.value = 'set ' + device + ' counterBoundary ' + date + ' ' + value;
+    return true;
+}
+function cmCounterCommand(device, command) {
+    var form = document.createElement('form');
+    form.method = 'get';
+    form.action = '';
+    var fields = { detail: device, cmd: 'set ' + device + ' ' + command };
+    var csrf = document.querySelector('.consumptionManagerCounters input[name="fwcsrf"]');
+    if (csrf) fields.fwcsrf = csrf.value;
+    for (var key in fields) {
+        var input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = key;
+        input.value = fields[key];
+        form.appendChild(input);
+    }
+    document.body.appendChild(form);
+    form.submit();
+}
+function cmCounterProtect(box, device, date) {
+    cmCounterCommand(device, 'counterProtect ' + date + ' ' + (box.checked ? '1' : '0'));
+}
+function cmCounterDelete(device, date) {
+    if (confirm('Manuellen Zählerstand vom ' + date + ' wirklich löschen?')) {
+        cmCounterCommand(device, 'counterDelete ' + date);
+    }
 }
 function cmMeterSubmit(form) {
     var fields = form.querySelectorAll('[data-cm-meter-field]');
