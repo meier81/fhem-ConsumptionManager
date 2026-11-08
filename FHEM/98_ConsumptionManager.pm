@@ -2248,7 +2248,15 @@ CM_ADVANCE_SCRIPT
             . 'Die bisher gespeicherten Werte bleiben unverändert.</p>';
     }
     my $canManageHistory = ($hash->{MEDIUM} // '') ne 'wastewater';
-    $html .= '<table class="block wide"><tr><th>Stichtag</th><th>Zählerstand</th>'
+    # Keep FHEMWEB's table theme; only add spacing for the wider action table.
+    $html .= '<style>'
+        . '.consumptionManagerCounters table.cmCounterHistory th,'
+        . '.consumptionManagerCounters table.cmCounterHistory td'
+        . '{padding:3px 12px 3px 6px;vertical-align:middle;white-space:nowrap;}'
+        . '.consumptionManagerCounters .cmCounterHistoryWrap{overflow-x:auto;max-width:100%;}'
+        . '</style>';
+    $html .= '<div class="cmCounterHistoryWrap">';
+    $html .= '<table class="block wide cmCounterHistory"><tr><th>Stichtag</th><th>Zählerstand</th>'
         . '<th>Abgelesen</th><th>Erfasst</th><th>Quelle</th><th>Aktion</th></tr>';
     my @history = sort {
         ($b->{boundary} // $b->{date} // '') cmp ($a->{boundary} // $a->{date} // '')
@@ -2286,7 +2294,7 @@ CM_ADVANCE_SCRIPT
     }
     $html .= '<tr><td colspan="6">Noch keine Stichtagswerte vorhanden.</td></tr>'
         unless @history;
-    $html .= '</table>';
+    $html .= '</table></div>';
     if ($canManageHistory) {
         $html .= '<p><button type="button" onclick="cmTariffToggle(\'cmCounterNew\')">'
             . 'Neuen Zählerstand anlegen</button></p>';
