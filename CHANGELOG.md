@@ -7,6 +7,7 @@
 - `get cost` ergänzt das aktuelle und vorherige Abrechnungsjahr.
 - Deutsche FHEM-Hilfe um Standardwerte und zulässige Bereiche der Attribute ergänzt.
 - Selektive Bereinigung der physischen Zählerstandshistorie aktiviert: tägliche, monatliche und jährliche Fristen mit Schutz von Tarif-, Zählerwechsel-, manuellen und Abrechnungsjahresgrenzen.
+- FHEMWEB-Zählerstandsverwaltung: manuellen Stichtag anlegen/bearbeiten/löschen, Checkbox zum dauerhaften Schutz aller Einträge; automatische Werte bleiben nicht editierbar.
 - Noch offen: vollständige automatisierte Tests und FHEM-Praxistest.
 
 ## 1.0.0 - 2026-11-01
