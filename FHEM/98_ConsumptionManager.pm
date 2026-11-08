@@ -320,22 +320,6 @@ sub ConsumptionManager_Set($@)
     ###############################################################################
 
     # User-controlled retention protection for any physical snapshot.
-    if ($cmd eq 'counterProtect') {
-        return 'Counter history is managed on the water device'
-            if ($hash->{MEDIUM} // '') eq 'wastewater';
-        return 'Usage: set '.$a[0].' counterProtect <YYYY-MM-DD> <0|1>'
-            unless @a == 4 && $a[2] =~ /^\d{4}-\d{2}-\d{2}$/
-                && $a[3] =~ /^[01]$/;
-        my $data = cm_coreLoad($hash);
-        return 'Unable to load storage' unless $data;
-        my @matches = grep { ref($_) eq 'HASH' && ($_->{date} // '') eq $a[2] }
-            @{ $data->{counterHistory} // [] };
-        return 'Expected exactly one matching snapshot' unless @matches == 1;
-        $matches[0]{protected} = $a[3] ? 1 : 0;
-        return 'Unable to save protection' unless cm_coreSave($hash, $data);
-        return undef;
-    }
-
     if ($cmd eq 'counterDelete') {
         return 'Counter history is managed on the water device'
             if ($hash->{MEDIUM} // '') eq 'wastewater';
@@ -347,7 +331,6 @@ sub ConsumptionManager_Set($@)
             @{ $data->{counterHistory} // [] };
         return 'Only one manual snapshot can be deleted'
             unless @matches == 1 && ($matches[0]{source} // '') eq 'manual';
-        return 'Protected snapshot: uncheck protection first' if $matches[0]{protected};
         $data->{counterHistory} = [
             grep { !(ref($_) eq 'HASH' && ($_->{date} // '') eq $a[2]) }
                 @{ $data->{counterHistory} }
@@ -1736,8 +1719,8 @@ sub ConsumptionManager_PruneCounterHistory {
     # Retain daily snapshots only within the configured daily window.
     # Older month/year opening boundaries are still needed for completed
     # period calculations; keep those independently of daily retention.
-    # Also protect custom billing-year boundaries, explicit manual
-    # snapshots, tariff boundaries and meter-change dates.
+    # Also retain custom billing-year boundaries and snapshots needed
+    # for tariff boundaries or meter changes, regardless of source.
     my $billingMonth = AttrVal($hash->{NAME}, 'billingYearStart', '01');
     $billingMonth = '01' unless $billingMonth =~ /^(?:0[1-9]|1[0-2])$/;
 
@@ -1767,10 +1750,9 @@ sub ConsumptionManager_PruneCounterHistory {
                 my $isMonth = substr($date, 8, 2) eq '01';
                 my $isYear = substr($date, 5, 5) eq '01-01';
                 my $isBilling = $isMonth && substr($date, 5, 2) eq $billingMonth;
-                my $isExplicitlyProtected = $entry->{protected} ? 1 : 0;
                 my $hasProtectedKind = ref($entry->{kinds}) eq 'ARRAY'
                     && grep { $_ eq 'tariff' || $_ eq 'meterChange' } @{ $entry->{kinds} };
-                $isExplicitlyProtected || $hasProtectedKind || $protectedDates{$date}
+                $hasProtectedKind || $protectedDates{$date}
                     || ($days && $date ge $dayLimit)
                     || ($months && $isMonth && $date ge $monthLimit)
                     || ($years && $isYear && $date ge $yearLimit)
@@ -1820,7 +1802,7 @@ sub ConsumptionManager_SetList {
     my ($hash, $unknown) = @_;
 
     my @commands = ('counter');
-    push @commands, 'counterBoundary', 'counterProtect', 'counterDelete', 'meterChange', 'meterChangeEdit',
+    push @commands, 'counterBoundary', 'counterDelete', 'meterChange', 'meterChangeEdit',
         'meterChangeApply'
         unless (($hash->{MEDIUM} // '') eq 'wastewater');
 
@@ -2267,7 +2249,7 @@ CM_ADVANCE_SCRIPT
     }
     my $canManageHistory = ($hash->{MEDIUM} // '') ne 'wastewater';
     $html .= '<table class="block wide"><tr><th>Stichtag</th><th>Zählerstand</th>'
-        . '<th>Abgelesen</th><th>Erfasst</th><th>Quelle</th><th>Geschützt</th><th>Aktion</th></tr>';
+        . '<th>Abgelesen</th><th>Erfasst</th><th>Quelle</th><th>Aktion</th></tr>';
     my @history = sort {
         ($b->{boundary} // $b->{date} // '') cmp ($a->{boundary} // $a->{date} // '')
     } grep { ref($_) eq 'HASH' } @{
@@ -2285,11 +2267,6 @@ CM_ADVANCE_SCRIPT
             $html .= '<td>' . ConsumptionManager_FWHtml($value) . '</td>';
         }
         if ($canManageHistory && $date =~ /^\d{4}-\d{2}-\d{2}$/) {
-            $html .= '<td><input type="checkbox"'
-                . ($entry->{protected} ? ' checked' : '')
-                . ' onchange="cmCounterProtect(this,\''
-                . ConsumptionManager_FWHtml($name) . '\',\''
-                . ConsumptionManager_FWHtml($date) . '\')"></td>';
             if ($manual) {
                 my $editId = 'cmCounterEdit_' . $date;
                 $html .= '<td><button type="button" onclick="cmTariffToggle(\''
@@ -2298,7 +2275,7 @@ CM_ADVANCE_SCRIPT
                     . ConsumptionManager_FWHtml($name) . '\',\''
                     . ConsumptionManager_FWHtml($date) . '\')">Löschen</button></td></tr>';
                 $html .= '<tr id="' . $editId
-                    . '" style="display:none"><td colspan="7">'
+                    . '" style="display:none"><td colspan="6">'
                     . ConsumptionManager_FWCounterForm($hash, $entry) . '</td></tr>';
             } else {
                 $html .= '<td>Automatisch</td></tr>';
@@ -2307,7 +2284,7 @@ CM_ADVANCE_SCRIPT
             $html .= '<td>–</td><td>–</td></tr>';
         }
     }
-    $html .= '<tr><td colspan="7">Noch keine Stichtagswerte vorhanden.</td></tr>'
+    $html .= '<tr><td colspan="6">Noch keine Stichtagswerte vorhanden.</td></tr>'
         unless @history;
     $html .= '</table>';
     if ($canManageHistory) {
@@ -2462,9 +2439,6 @@ function cmCounterCommand(device, command) {
     }
     document.body.appendChild(form);
     form.submit();
-}
-function cmCounterProtect(box, device, date) {
-    cmCounterCommand(device, 'counterProtect ' + date + ' ' + (box.checked ? '1' : '0'));
 }
 function cmCounterDelete(device, date) {
     if (confirm('Manuellen Zählerstand vom ' + date + ' wirklich löschen?')) {
