@@ -319,12 +319,56 @@ sub ConsumptionManager_Set($@)
     # Optional correction for a monthly start counter
     ###############################################################################
 
+    # User-controlled retention protection for any physical snapshot.
+    if ($cmd eq 'counterProtect') {
+        return 'Counter history is managed on the water device'
+            if ($hash->{MEDIUM} // '') eq 'wastewater';
+        return 'Usage: set '.$a[0].' counterProtect <YYYY-MM-DD> <0|1>'
+            unless @a == 4 && $a[2] =~ /^\d{4}-\d{2}-\d{2}$/
+                && $a[3] =~ /^[01]$/;
+        my $data = cm_coreLoad($hash);
+        return 'Unable to load storage' unless $data;
+        my @matches = grep { ref($_) eq 'HASH' && ($_->{date} // '') eq $a[2] }
+            @{ $data->{counterHistory} // [] };
+        return 'Expected exactly one matching snapshot' unless @matches == 1;
+        $matches[0]{protected} = $a[3] ? 1 : 0;
+        return 'Unable to save protection' unless cm_coreSave($hash, $data);
+        return undef;
+    }
+
+    if ($cmd eq 'counterDelete') {
+        return 'Counter history is managed on the water device'
+            if ($hash->{MEDIUM} // '') eq 'wastewater';
+        return 'Usage: set '.$a[0].' counterDelete <YYYY-MM-DD>'
+            unless @a == 3 && $a[2] =~ /^\d{4}-\d{2}-\d{2}$/;
+        my $data = cm_coreLoad($hash);
+        return 'Unable to load storage' unless $data;
+        my @matches = grep { ref($_) eq 'HASH' && ($_->{date} // '') eq $a[2] }
+            @{ $data->{counterHistory} // [] };
+        return 'Only one manual snapshot can be deleted'
+            unless @matches == 1 && ($matches[0]{source} // '') eq 'manual';
+        return 'Protected snapshot: uncheck protection first' if $matches[0]{protected};
+        $data->{counterHistory} = [
+            grep { !(ref($_) eq 'HASH' && ($_->{date} // '') eq $a[2]) }
+                @{ $data->{counterHistory} }
+        ];
+        return 'Unable to save history' unless cm_coreSave($hash, $data);
+        ConsumptionManager_UpdateReadings($hash);
+        return undef;
+    }
+
     if ($cmd eq "counterBoundary") {
         return "Physical midnight boundaries are managed on the water device"
             if ($hash->{MEDIUM} // '') eq 'wastewater';
         return "Usage: set ".$a[0]." counterBoundary <YYYY-MM-DD> <counter>"
             unless @a == 4;
         my ($date, $counter) = @a[2, 3];
+        my $existingData = cm_coreLoad($hash);
+        return 'Unable to load storage' unless $existingData;
+        my @existing = grep { ref($_) eq 'HASH' && ($_->{date} // '') eq $date }
+            @{ $existingData->{counterHistory} // [] };
+        return 'Automatic snapshots cannot be edited'
+            if @existing && (@existing != 1 || ($existing[0]{source} // '') ne 'manual');
         return "Invalid physical midnight boundary"
             unless defined($date) && $date =~ /^\d{4}-\d{2}-\d{2}$/
                 && defined($counter) && $counter =~ /^\d+(?:\.\d+)?$/;
@@ -1723,10 +1767,10 @@ sub ConsumptionManager_PruneCounterHistory {
                 my $isMonth = substr($date, 8, 2) eq '01';
                 my $isYear = substr($date, 5, 5) eq '01-01';
                 my $isBilling = $isMonth && substr($date, 5, 2) eq $billingMonth;
-                my $isManual = ($entry->{source} // '') eq 'manual';
+                my $isExplicitlyProtected = $entry->{protected} ? 1 : 0;
                 my $hasProtectedKind = ref($entry->{kinds}) eq 'ARRAY'
                     && grep { $_ eq 'tariff' || $_ eq 'meterChange' } @{ $entry->{kinds} };
-                $isManual || $hasProtectedKind || $protectedDates{$date}
+                $isExplicitlyProtected || $hasProtectedKind || $protectedDates{$date}
                     || ($days && $date ge $dayLimit)
                     || ($months && $isMonth && $date ge $monthLimit)
                     || ($years && $isYear && $date ge $yearLimit)
@@ -1776,7 +1820,7 @@ sub ConsumptionManager_SetList {
     my ($hash, $unknown) = @_;
 
     my @commands = ('counter');
-    push @commands, 'counterBoundary', 'meterChange', 'meterChangeEdit',
+    push @commands, 'counterBoundary', 'counterProtect', 'counterDelete', 'meterChange', 'meterChangeEdit',
         'meterChangeApply'
         unless (($hash->{MEDIUM} // '') eq 'wastewater');
 
