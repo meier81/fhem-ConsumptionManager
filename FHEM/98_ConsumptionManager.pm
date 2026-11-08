@@ -2422,32 +2422,41 @@ stehen auf der Detailseite des Geräts zur Verfügung.</p>
 </ul>
 
 <a id="ConsumptionManager_attr"></a>
-<h4>Attribute</h4>
+<h4>Attribute und Standardwerte</h4>
+<p>Die genannten Standardwerte gelten, wenn das jeweilige Attribut nicht gesetzt ist.</p>
 <ul>
-  <li><code>counterDevice</code>: Name des Quellgeräts; bei Abwasser das
-  verknüpfte ConsumptionManager-Wassergerät.</li>
-  <li><code>counterReading</code>: Reading mit dem physischen Zählerstand
-  des Quellgeräts.</li>
-  <li><code>counterMultiplier</code>: positiver Faktor für den eingelesenen
-  Zählerstand, beispielsweise <code>0.001</code> für Wh nach kWh.</li>
-  <li><code>consumptionUnit</code>: rein numerische Anzeigeeinheit. Bei Strom
-  <code>kWh</code> oder <code>Wh</code>, bei Gas, Wasser und Abwasser
-  <code>m3</code> oder <code>l</code>. Beeinflusst die sechs
-  <code>consumption...</code>-Readings und den zugehörigen Durchfluss
-  beziehungsweise die elektrische Momentanleistung.</li>
-  <li><code>flowUnit</code>: bei Gas und Wasser Anzeige des Durchflusses in <code>m3/h</code> oder <code>l/h</code>.</li>
-  <li><code>powerUnit</code>: bei Strom und Gas, unabhängige Anzeige der
-  thermischen Momentanleistung in <code>kW</code> oder <code>W</code>.</li>
-  <li><code>consumptionDecimals</code>: Nachkommastellen für
-  Verbrauchsreadings (0 bis 9). Bei Anzeige in Wh oder Litern werden
-  die Nachkommastellen für die Umrechnung angepasst.</li>
-  <li><code>currentTimeout</code>: Zeit in Sekunden, nach der ein
-  Momentanwert ohne neues Zählerereignis auf null gesetzt wird;
+  <li><code>counterDevice</code>: Quellgerät; kein Standard (muss konfiguriert werden).
+  Bei Abwasser das verknüpfte ConsumptionManager-Wassergerät.</li>
+  <li><code>counterReading</code>: Reading des physischen Zählerstands;
+  kein Standard (bei direkter Zähleranbindung erforderlich).</li>
+  <li><code>counterMultiplier</code>: Faktor für eingelesene Zählerstände;
+  Standard <code>1</code> (keine Umrechnung), z. B. <code>0.001</code> für Wh nach kWh.</li>
+  <li><code>consumptionUnit</code>: Anzeigeeinheit für Verbrauch;
+  Standard bei Strom <code>kWh</code>, sonst <code>m3</code>.
+  Strom: Wh/kWh; Gas, Wasser, Abwasser: m3/l.</li>
+  <li><code>flowUnit</code>: Durchflusseinheit bei Gas und Wasser;
+  Standard <code>m3/h</code>, alternativ <code>l/h</code>.</li>
+  <li><code>powerUnit</code>: Leistungseinheit bei Strom und Gas;
+  Standard <code>kW</code>, alternativ <code>W</code>.</li>
+  <li><code>billingYearStart</code>: Beginn des Abrechnungsjahres;
+  Standard <code>01</code> (Januar), auswählbar <code>01</code> bis <code>12</code>.
+  Der Zeitraum beginnt immer am ersten Tag des gewählten Monats;
+  <code>05</code> entspricht beispielsweise Mai bis April.</li>
+  <li><code>consumptionDecimals</code>: Nachkommastellen der Verbrauchsreadings
+  (0 bis 9). Standard: automatische Ermittlung anhand des Quellreadings,
+  des Multiplikators oder gespeicherter Zählerdaten; falls keine Ermittlung
+  möglich ist, <code>3</code>. Bei Wh/l wird die Anzeigepräzision angepasst.</li>
+  <li><code>currentTimeout</code>: Sekunden bis zum Zurücksetzen des
+  Momentanwerts ohne neues Zählerereignis; Standard <code>300</code> Sekunden,
   <code>0</code> deaktiviert den Timeout.</li>
-  <li><code>dailyHistoryDays</code>, <code>monthlyHistoryMonths</code>,
-  <code>yearlyHistoryYears</code>: Aufbewahrungsdauer der
-  jeweiligen Historien.</li>
-  <li><code>disable</code>: Modul deaktivieren (<code>0</code>/<code>1</code>).</li>
+  <li><code>dailyHistoryDays</code>: Aufbewahrung der Tageshistorie;
+  Standard <code>7</code> Tage, zulässig 0 bis 3650.</li>
+  <li><code>monthlyHistoryMonths</code>: Aufbewahrung der Monatshistorie;
+  Standard <code>24</code> Monate, zulässig 0 bis 120.</li>
+  <li><code>yearlyHistoryYears</code>: Aufbewahrung der Jahreshistorie;
+  Standard <code>10</code> Jahre, zulässig 0 bis 100.</li>
+  <li><code>disable</code>: Modul deaktivieren; Standard <code>0</code>
+  (aktiv), <code>1</code> deaktiviert.</li>
 </ul>
 <pre>
 attr StromVerbrauch consumptionUnit Wh
