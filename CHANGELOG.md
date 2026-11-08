@@ -5,6 +5,7 @@
 - Kalenderjahr-Auswertungen bleiben unverändert.
 - `get billing` und `get overview` zeigen die Abrechnung seit dem gewählten Abrechnungsbeginn einschließlich Abschlägen und Finanzreserve.
 - `get cost` ergänzt das aktuelle und vorherige Abrechnungsjahr.
+- Deutsche FHEM-Hilfe um Standardwerte und zulässige Bereiche der Attribute ergänzt.
 - Noch offen: vollständige automatisierte Tests und FHEM-Praxistest.
 
 ## 1.0.0 - 2026-11-01
