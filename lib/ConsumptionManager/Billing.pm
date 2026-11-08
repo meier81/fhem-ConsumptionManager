@@ -92,6 +92,9 @@ sub cm_billingCalculatePhysicalPeriod {
         unless ref($physical) eq 'HASH';
 
     my $endDay = $physical->{endDate};
+    # A live meter reading can be older than today. Consumption ends at
+    # the last observation, but recurring charges run through today.
+    my $billingEndDay = defined($endDate) ? $endDay : cm_today();
     my @tariffStarts = sort map { $_->{validFrom} }
         grep { ref($_) eq 'HASH'
             && defined($_->{validFrom})
@@ -136,7 +139,7 @@ sub cm_billingCalculatePhysicalPeriod {
         # For a live reading, the current calendar day is included.
         my $days = defined($to) ? cm_dateDiffDays($from, $to)
             : defined($endDate) ? cm_dateDiffDays($from, $endDate)
-            : cm_dateDiffDays($from, $endDay) + 1;
+            : cm_dateDiffDays($from, $billingEndDay) + 1;
         return undef unless defined($days) && $days >= 0;
         my $work = $converted * ($tariff->{workPrice} // 0);
         my $base = _cm_billingBaseForDays($tariff, $days, $from);
@@ -150,7 +153,7 @@ sub cm_billingCalculatePhysicalPeriod {
             && defined($surfaceUsage) && defined($surfaceRecurring);
 
         push @results, {
-            startDate => $from, endDate => $to // $endDay,
+            startDate => $from, endDate => $to // $billingEndDay,
             days => $days,
             counterConsumption => $segment->{consumption},
             billingConsumption => $converted,
@@ -170,7 +173,7 @@ sub cm_billingCalculatePhysicalPeriod {
     }
     return {
         status => 'active', source => 'physicalReadings',
-        startDate => $startDate, endDate => $endDay,
+        startDate => $startDate, endDate => $billingEndDay,
         counterConsumption => $usage,
         billingConsumption => $billed,
         workCost => $workTotal, baseCost => $baseTotal,
