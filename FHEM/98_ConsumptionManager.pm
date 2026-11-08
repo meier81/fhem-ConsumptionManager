@@ -1689,10 +1689,52 @@ sub ConsumptionManager_PruneCounterHistory {
     }
     my $yearLimit = $years ? sprintf('%04d-01-01', $year - $years) : '';
 
-    # Physical consumption and billing require historical midnight boundaries.
-    # Keep all entries until retention can prove that no active tariff or
-    # calculation window still depends on the boundary.
-    return;
+    # Retain daily snapshots only within the configured daily window.
+    # Older month/year opening boundaries are still needed for completed
+    # period calculations; keep those independently of daily retention.
+    # Also protect custom billing-year boundaries, explicit manual
+    # snapshots, tariff boundaries and meter-change dates.
+    my $billingMonth = AttrVal($hash->{NAME}, 'billingYearStart', '01');
+    $billingMonth = '01' unless $billingMonth =~ /^(?:0[1-9]|1[0-2])$/;
+
+    my %protectedDates;
+    for my $tariff (@{ $data->{tariffs} // [] }) {
+        next unless ref($tariff) eq 'HASH';
+        my $date = $tariff->{validFrom} // '';
+        $protectedDates{$date} = 1 if $date =~ /^\d{4}-\d{2}-\d{2}$/;
+    }
+    for my $change (@{ $data->{meterChanges} // [] }) {
+        next unless ref($change) eq 'HASH';
+        my $date = $change->{date} // '';
+        $protectedDates{$date} = 1 if $date =~ /^\d{4}-\d{2}-\d{2}$/;
+    }
+
+    my @retained = grep {
+        my $entry = $_;
+        if (ref($entry) ne 'HASH') {
+            1; # Never silently discard unrecognized records.
+        }
+        else {
+            my $date = $entry->{date} // substr($entry->{boundary} // '', 0, 10);
+            if ($date !~ /^\d{4}-\d{2}-\d{2}$/) {
+                1;
+            }
+            else {
+                my $isMonth = substr($date, 8, 2) eq '01';
+                my $isYear = substr($date, 5, 5) eq '01-01';
+                my $isBilling = $isMonth && substr($date, 5, 2) eq $billingMonth;
+                my $isManual = ($entry->{source} // '') eq 'manual';
+                my $hasProtectedKind = ref($entry->{kinds}) eq 'ARRAY'
+                    && grep { $_ eq 'tariff' || $_ eq 'meterChange' } @{ $entry->{kinds} };
+                $isManual || $hasProtectedKind || $protectedDates{$date}
+                    || ($days && $date ge $dayLimit)
+                    || ($months && $isMonth && $date ge $monthLimit)
+                    || ($years && $isYear && $date ge $yearLimit)
+                    || ($years && $isBilling && $date ge $yearLimit);
+            }
+        }
+    } @{ $data->{counterHistory} };
+    $data->{counterHistory} = \@retained;
 }
 
 sub ConsumptionManager_SnapshotTimestamp {
