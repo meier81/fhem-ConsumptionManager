@@ -2492,11 +2492,12 @@ stehen auf der Detailseite des Geräts zur Verfügung.</p>
   Momentanwerts ohne neues Zählerereignis; Standard <code>300</code> Sekunden,
   <code>0</code> deaktiviert den Timeout.</li>
   <li><code>dailyHistoryDays</code>: Aufbewahrung der Tageshistorie;
-  Standard <code>7</code> Tage, zulässig 0 bis 3650.</li>
+  Standard <code>7</code> Tage, zulässig 0 bis 3650. Ältere tägliche Stichtage werden beim nächsten gespeicherten Tagesstichtag bereinigt, soweit sie nicht für andere Zeiträume geschützt sind.</li>
   <li><code>monthlyHistoryMonths</code>: Aufbewahrung der Monatshistorie;
-  Standard <code>24</code> Monate, zulässig 0 bis 120.</li>
+  Standard <code>24</code> Monate, zulässig 0 bis 120. Monatsanfänge bleiben unabhängig von der Tagesfrist erhalten.</li>
   <li><code>yearlyHistoryYears</code>: Aufbewahrung der Jahreshistorie;
-  Standard <code>10</code> Jahre, zulässig 0 bis 100.</li>
+  Standard <code>10</code> Jahre, zulässig 0 bis 100. Jahres- und konfigurierte Abrechnungsjahresanfänge bleiben geschützt.</li>
+  <li>Die Bereinigung bewahrt zusätzlich manuell erfasste Stichtage, vorhandene Tarifwechselgrenzen und Zählerwechselgrenzen. <code>0</code> bei einem History-Attribut deaktiviert die Aufbewahrung dieser Periodenart, nicht die anderen Schutzregeln.</li>
   <li><code>disable</code>: Modul deaktivieren; Standard <code>0</code>
   (aktiv), <code>1</code> deaktiviert.</li>
 </ul>
