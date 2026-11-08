@@ -2281,7 +2281,7 @@ CM_ADVANCE_SCRIPT
                 $html .= '<td>Automatisch</td></tr>';
             }
         } else {
-            $html .= '<td>–</td><td>–</td></tr>';
+            $html .= '<td>–</td></tr>';
         }
     }
     $html .= '<tr><td colspan="6">Noch keine Stichtagswerte vorhanden.</td></tr>'
