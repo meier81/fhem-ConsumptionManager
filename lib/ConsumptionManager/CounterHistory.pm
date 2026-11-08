@@ -117,9 +117,18 @@ sub cm_counterHistoryCalculateCurrent {
     my $start = _boundary($data, $startDate);
     return undef unless $start;
     my $observed = $data->{meter}{lastUpdate} // '';
-    return undef unless $observed =~ /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/
-        && $observed ge "$startDate 00:00:00";
-    return _calculate($data, "$startDate 00:00:00", $observed,
+    return undef unless $observed =~ /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+    my $boundaryAt = "$startDate 00:00:00";
+    if ($observed lt $boundaryAt) {
+        # A last-known midnight snapshot can be newer than the last actual
+        # observation. Only carry it forward as zero consumption when the
+        # unchanged live counter confirms that same known value.
+        return undef unless 0 + $data->{meter}{current} == 0 + $start->{counter};
+        return _calculate($data, $boundaryAt, $boundaryAt,
+            $start->{counter}, $start->{counter},
+            'physicalBoundaryAndStaleReading');
+    }
+    return _calculate($data, $boundaryAt, $observed,
         $start->{counter}, $data->{meter}{current},
         'physicalBoundaryAndLiveReading');
 }
