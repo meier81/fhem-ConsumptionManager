@@ -247,6 +247,37 @@ sub ConsumptionManager_Set($@)
         return undef;
     }
 
+    # Delete a dated tariff or advance by stable ID and matching start date.
+    # Do not renumber IDs or silently change neighbouring periods.
+    if ($cmd eq 'tariffDelete' || $cmd eq 'advanceDelete') {
+        return "Usage: set ".$a[0]." $cmd <id> <YYYY-MM-DD>"
+            unless @a == 4 && $a[2] =~ /^\d+$/
+                && $a[3] =~ /^\d{4}-\d{2}-\d{2}$/;
+        my $field = $cmd eq 'tariffDelete' ? 'tariffs' : 'advances';
+        my $data = cm_coreLoad($hash);
+        return "Unable to load storage" unless $data;
+        my $copy = eval { JSON::PP->new->decode(JSON::PP->new->encode($data)) };
+        return "Unable to copy storage" if $@ || ref($copy) ne 'HASH';
+        my $entries = $copy->{$field};
+        return "Entry not found" unless ref($entries) eq 'ARRAY';
+        my @matches = grep {
+            ref($_) eq 'HASH' && defined($_->{id})
+                && $_->{id} =~ /^\d+$/ && $_->{id} == $a[2]
+                && ($_->{validFrom} // '') eq $a[3]
+        } @$entries;
+        return "Entry not found or ambiguous" unless @matches == 1;
+        $copy->{$field} = [
+            grep {
+                !(ref($_) eq 'HASH' && defined($_->{id})
+                    && $_->{id} =~ /^\d+$/ && $_->{id} == $a[2]
+                    && ($_->{validFrom} // '') eq $a[3])
+            } @$entries
+        ];
+        return "Unable to save storage" unless cm_coreSave($hash, $copy);
+        ConsumptionManager_UpdateReadings($hash);
+        return undef;
+    }
+
     # Atomic FHEMWEB form for a physical meter replacement.
     if ($cmd eq 'meterChangeApply') {
         return "Meter changes are managed on the water device"
@@ -1832,7 +1863,7 @@ sub ConsumptionManager_SetList {
 
     my ($hash, $unknown) = @_;
 
-    my @commands = ('counter');
+    my @commands = ('counter', 'tariffDelete', 'advanceDelete');
     push @commands, 'counterBoundary', 'counterDelete', 'meterChange', 'meterChangeEdit',
         'meterChangeApply', 'meterChangeDelete'
         unless (($hash->{MEDIUM} // '') eq 'wastewater');
@@ -2145,7 +2176,11 @@ sub ConsumptionManager_FWDetail {
             $html .= '<td>'.$shown.'</td>';
         }
         $html .= '<td><button type="button" onclick="cmTariffToggle('
-            ."'cmTariffEdit_".$id."'".')">Bearbeiten</button></td></tr>';
+            ."'cmTariffEdit_".$id."'".')">Bearbeiten</button> '
+            . '<button type="button" onclick="cmDatedEntryDelete(\''
+            . ConsumptionManager_FWHtml($name) . '\',\'tariffDelete\','
+            . $id . ',\'' . ConsumptionManager_FWHtml($tariff->{validFrom} // '')
+            . '\')">Löschen</button></td></tr>';
         $html .= '<tr id="cmTariffEdit_'.$id.'" style="display:none"><td colspan="6">'
             .ConsumptionManager_FWForm($hash, $tariff, $id).'</td></tr>';
     }
@@ -2172,6 +2207,13 @@ sub ConsumptionManager_FWDetail {
     }
     $html .= <<'CM_TARIFF_SCRIPT';
 <script>
+function cmDatedEntryDelete(device, command, id, date) {
+    var label = command === 'tariffDelete' ? 'Tarif' : 'Abschlag';
+    if (confirm(label + ' (ID ' + id + ', gültig ab ' + date
+        + ') wirklich löschen? Die Abrechnung wird neu berechnet.')) {
+        cmCounterCommand(device, command + ' ' + id + ' ' + date);
+    }
+}
 function cmTariffToggle(id) {
     var el = document.getElementById(id);
     if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
@@ -2205,7 +2247,11 @@ CM_TARIFF_SCRIPT
             $html .= '<td>'.$value.'</td>';
         }
         $html .= '<td><button type="button" onclick="cmTariffToggle('
-            ."'cmAdvanceEdit_".$id."'".')">Bearbeiten</button></td></tr>';
+            ."'cmAdvanceEdit_".$id."'".')">Bearbeiten</button> '
+            . '<button type="button" onclick="cmDatedEntryDelete(\''
+            . ConsumptionManager_FWHtml($name) . '\',\'advanceDelete\','
+            . $id . ',\'' . ConsumptionManager_FWHtml($advance->{validFrom} // '')
+            . '\')">Löschen</button></td></tr>';
         $html .= '<tr id="cmAdvanceEdit_'.$id.'" style="display:none"><td colspan="6">'
             .ConsumptionManager_FWAdvanceForm($hash, $advance, $id).'</td></tr>';
     }
@@ -2616,6 +2662,10 @@ stehen auf der Detailseite des Geräts zur Verfügung.</p>
 <h4>GET-Befehle</h4>
 <ul>
   <li><code>get &lt;name&gt; advance</code>: aktuell gültigen Abschlag anzeigen.</li>
+  <li><code>set &lt;name&gt; tariffDelete &lt;id&gt; &lt;JJJJ-MM-TT&gt;</code>:
+  Tarif nach Bestätigung löschen.</li>
+  <li><code>set &lt;name&gt; advanceDelete &lt;id&gt; &lt;JJJJ-MM-TT&gt;</code>:
+  Abschlagszeitraum nach Bestätigung löschen.</li>
   <li><code>get &lt;name&gt; advanceHistory</code>: Abschlagshistorie anzeigen.</li>
   <li><code>get &lt;name&gt; billing</code>: Abrechnung des laufenden Kalenderjahrs ausgeben.</li>
   <li><code>get &lt;name&gt; cost</code>: Kostenübersicht für Verbrauchszeiträume anzeigen.</li>
