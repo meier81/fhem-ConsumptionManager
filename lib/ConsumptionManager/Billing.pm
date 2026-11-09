@@ -95,13 +95,15 @@ sub cm_billingCalculatePhysicalPeriod {
     # A live meter reading can be older than today. Consumption ends at
     # the last observation, but recurring charges run through today.
     my $billingEndDay = defined($endDate) ? $endDay : cm_today();
+    my $observedAt = !defined($endDate) ? ($data->{meter}{lastUpdate} // '') : '';
+    my $observedDay = $observedAt =~ /^(\d{4}-\d{2}-\d{2}) / ? $1 : '';
     my @tariffStarts = sort map { $_->{validFrom} }
         grep { ref($_) eq 'HASH'
             && defined($_->{validFrom})
             && $_->{validFrom} gt $startDate
             && (defined($endDate)
                 ? $_->{validFrom} lt $endDay
-                : $_->{validFrom} le $endDay)
+                : $_->{validFrom} le $billingEndDay)
         } @{ $data->{tariffs} // [] };
     # Two tariff definitions with the same start date would otherwise
     # produce a zero-length interval and ambiguous billing.
@@ -118,13 +120,37 @@ sub cm_billingCalculatePhysicalPeriod {
     for my $i (0 .. $#dates) {
         my $from = $dates[$i];
         my $to = $i < $#dates ? $dates[$i+1] : undef;
-        my $segment = $i == 0 && !defined($to)
-            ? $physical
-            : defined($to)
-                ? cm_counterHistoryCalculateRange($data, $from, $to)
-                : defined($endDate)
-                    ? cm_counterHistoryCalculateRange($data, $from, $endDate)
-                    : cm_counterHistoryCalculateCurrent($data, $from);
+        my $segment;
+        if (!defined($endDate) && $observedDay ne ''
+            && $from gt $observedDay) {
+            # The tariff starts after the last physical observation.
+            # Charge recurring costs, but never extrapolate meter usage.
+            # A replacement since that observation makes the assumption
+            # of an unchanged physical meter unsafe.
+            my $unobservedChange = grep {
+                ref($_) eq 'HASH'
+                    && ($_->{date} // '') ge $observedDay
+            } @{ $data->{meterChanges} // [] };
+            return { status => 'incomplete', error => 'unobservedMeterChange' }
+                if $unobservedChange;
+            $segment = { consumption => 0, segments => [] };
+        }
+        elsif (!defined($endDate) && defined($to)
+            && $observedDay ne '' && $to gt $observedDay) {
+            # The next tariff begins after the last observed reading.
+            # Assign only measured usage to the preceding tariff.
+            $segment = $i == 0 ? $physical
+                : cm_counterHistoryCalculateCurrent($data, $from);
+        }
+        else {
+            $segment = $i == 0 && !defined($to)
+                ? $physical
+                : defined($to)
+                    ? cm_counterHistoryCalculateRange($data, $from, $to)
+                    : defined($endDate)
+                        ? cm_counterHistoryCalculateRange($data, $from, $endDate)
+                        : cm_counterHistoryCalculateCurrent($data, $from);
+        }
         return { status => 'incomplete', error => 'missingPhysicalTariffBoundary',
                  boundary => $from }
             unless ref($segment) eq 'HASH';
