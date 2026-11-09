@@ -275,6 +275,29 @@ sub ConsumptionManager_Set($@)
         return undef;
     }
 
+    if ($cmd eq 'meterChangeDelete') {
+        return "Meter changes are managed on the water device"
+            if ($hash->{MEDIUM} // '') eq 'wastewater';
+        return "Usage: set ".$a[0]." meterChangeDelete <index> <effectiveAt>"
+            unless @a == 4 && $a[2] =~ /^\d+$/
+                && $a[3] =~ /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
+        my $data = cm_coreLoad($hash);
+        return "Unable to load storage" unless $data;
+        my $copy = eval { JSON::PP->new->decode(JSON::PP->new->encode($data)) };
+        return "Unable to copy storage" if $@ || ref($copy) ne 'HASH';
+        my $changes = $copy->{meterChanges};
+        my $index = $a[2];
+        return "Meter change not found"
+            unless ref($changes) eq 'ARRAY' && $index < @$changes
+                && ref($changes->[$index]) eq 'HASH'
+                && ($changes->[$index]{effectiveAt} // '') eq
+                    ($a[3] =~ s/T/ /r);
+        splice @$changes, $index, 1;
+        return "Unable to save storage" unless cm_coreSave($hash, $copy);
+        ConsumptionManager_UpdateReadings($hash);
+        return undef;
+    }
+
     if ($cmd eq 'meterChangeEdit') {
         return "Meter changes are managed on the water device"
             if ($hash->{MEDIUM} // '') eq 'wastewater';
@@ -1811,7 +1834,7 @@ sub ConsumptionManager_SetList {
 
     my @commands = ('counter');
     push @commands, 'counterBoundary', 'counterDelete', 'meterChange', 'meterChangeEdit',
-        'meterChangeApply'
+        'meterChangeApply', 'meterChangeDelete'
         unless (($hash->{MEDIUM} // '') eq 'wastewater');
 
     my $data = cm_coreLoad($hash);
@@ -2336,7 +2359,12 @@ CM_ADVANCE_SCRIPT
         if (($hash->{MEDIUM} // '') ne 'wastewater' && $originalIndex >= 0) {
             my $editId = 'cmMeterEdit_' . $originalIndex;
             $html .= '<td><button type="button" onclick="cmTariffToggle(\''
-                . $editId . '\')">Bearbeiten</button></td></tr>';
+                . $editId . '\')">Bearbeiten</button> '
+                . '<button type="button" onclick="cmMeterDelete(\''
+                . ConsumptionManager_FWHtml($name) . '\','
+                . $originalIndex . ',\''
+                . ConsumptionManager_FWHtml(($change->{effectiveAt} // '') =~ s/ /T/r)
+                . '\')">Löschen</button></td></tr>';
             $html .= '<tr id="' . $editId . '" style="display:none"><td colspan="6">';
             $html .= '<form method="get" action="" onsubmit="return cmMeterSubmit(this)">';
             $html .= '<input type="hidden" name="detail" value="'
@@ -2461,6 +2489,12 @@ function cmCounterDelete(device, date) {
         cmCounterCommand(device, 'counterDelete ' + date);
     }
 }
+function cmMeterDelete(device, index, effectiveAt) {
+    if (confirm('Zählerwechsel vom ' + effectiveAt.replace('T', ' ')
+        + ' wirklich löschen?')) {
+        cmCounterCommand(device, 'meterChangeDelete ' + index + ' ' + effectiveAt);
+    }
+}
 function cmMeterSubmit(form) {
     var fields = form.querySelectorAll('[data-cm-meter-field]');
     var values = {};
@@ -2546,6 +2580,8 @@ Anzeigeattribut <code>consumptionUnit</code>.</p>
   Zählerwechsel erfassen (nicht für Abwasser).</li>
   <li><code>set &lt;name&gt; meterChangeEdit &lt;index&gt; &lt;JJJJ-MM-TT&gt; &lt;alt&gt; &lt;neu&gt; &lt;HH:MM[:SS]&gt; [Kommentar]</code>:
   erfassten Zählerwechsel korrigieren.</li>
+  <li><code>set &lt;name&gt; meterChangeDelete &lt;index&gt; &lt;JJJJ-MM-TTTHH:MM:SS&gt;</code>:
+  erfassten Zählerwechsel nach Bestätigung löschen.</li>
   <li><code>meterChangeApply</code>: technischer Speicherbefehl der
   grafischen Zählerwechselmaske.</li>
   <li><code>tariffCreate</code>, <code>tariffEdit &lt;id&gt;</code>,
