@@ -137,20 +137,15 @@ sub cm_meterRegisterChange {
     return 0 unless defined $oldCounter && $oldCounter =~ /^\d+(?:\.\d+)?$/;
     return 0 unless defined $newCounter && $newCounter =~ /^\d+(?:\.\d+)?$/;
 
-    # Optional local timestamp of the actual physical replacement. Historical
-    # date-only entries remain valid, but are not silently treated as timed.
-    if (defined $effectiveAt && length $effectiveAt) {
+    # New meter changes require a documented local timestamp.
+    # Existing legacy date-only entries remain unchanged.
+    return 0 unless defined($effectiveAt) && length($effectiveAt);
+    {
         return 0 unless $effectiveAt =~ /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/
             && substr($effectiveAt, 0, 10) eq $date;
         my ($hh, $mm, $ss) = $effectiveAt =~ / (\d{2}):(\d{2}):(\d{2})$/;
         return 0 if $hh > 23 || $mm > 59 || $ss > 59;
         return 0 if $effectiveAt gt cm_timestamp();
-    }
-
-    # A newly registered replacement today has a known event timestamp.
-    # Older date-only records remain untouched and explicitly ambiguous.
-    if ((!defined($effectiveAt) || $effectiveAt eq '') && $date eq cm_today()) {
-        $effectiveAt = cm_timestamp();
     }
 
     $oldCounter += 0;
@@ -160,6 +155,7 @@ sub cm_meterRegisterChange {
     $data->{meterChanges} = [] unless ref($data->{meterChanges}) eq 'ARRAY';
     for my $entry (@{ $data->{meterChanges} }) {
         next unless ref($entry) eq 'HASH';
+        return 0 if ($entry->{effectiveAt} // '') eq $effectiveAt;
         return 0 if (($entry->{date} // '') eq $date)
             && (($entry->{oldCounter} // -1) == $oldCounter)
             && (($entry->{newCounter} // -1) == $newCounter);
@@ -173,7 +169,8 @@ sub cm_meterRegisterChange {
             ? (effectiveAt => $effectiveAt) : ()),
     };
     @{$data->{meterChanges}} = sort {
-        ($a->{date} // '') cmp ($b->{date} // '')
+        ($a->{effectiveAt} // ($a->{date} // '')) cmp
+        ($b->{effectiveAt} // ($b->{date} // ''))
     } @{$data->{meterChanges}};
     # Registering an event must not overwrite an independently observed
     # physical live reading. The next meter sample establishes the new value.
@@ -220,9 +217,10 @@ sub cm_meterEditChange {
         return 0 if defined($data->{meter}{current})
             && $data->{meter}{current} < $newCounter;
     }
-    # A historical timestamp may be supplied later without changing the
-    # physical counters. Never infer an undocumented time.
-    if (defined($effectiveAt) && length($effectiveAt)) {
+    # Every edited entry must have an explicit time; legacy entries can be
+    # completed during editing without changing their physical counters.
+    return 0 unless defined($effectiveAt) && length($effectiveAt);
+    {
         return 0 unless $effectiveAt =~ /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/
             && substr($effectiveAt, 0, 10) eq $date;
         my ($hh, $mm, $ss) = $effectiveAt =~ / (\d{2}):(\d{2}):(\d{2})$/;
@@ -238,6 +236,10 @@ sub cm_meterEditChange {
     $entry->{oldCounter} = 0 + $oldCounter;
     $entry->{newCounter} = 0 + $newCounter;
     $entry->{comment} = defined($comment) ? $comment : '';
+    @{$data->{meterChanges}} = sort {
+        ($a->{effectiveAt} // ($a->{date} // '')) cmp
+        ($b->{effectiveAt} // ($b->{date} // ''))
+    } @{$data->{meterChanges}};
     return 1;
 }
 
