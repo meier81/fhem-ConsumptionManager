@@ -72,22 +72,14 @@ sub cm_meterUpdate {
     my $now = cm_now();
     if (defined($oldCounter)) {
         my $consumption = cm_meterConsumption($oldCounter, $newCounter);
+        # Physical samples must never be discarded because a replacement
+        # has not yet been entered. A negative delta is not a valid flow.
+        # History/billing validates the complete sequence separately.
         if ($consumption < 0) {
-            # A lower reading is only valid immediately after a documented
-            # replacement whose old final counter matches the last sample.
-            my @changes = grep {
-                ref($_) eq 'HASH'
-                    && ($_->{date} // '') eq cm_today()
-                    && defined($_->{effectiveAt})
-                    && defined($_->{oldCounter})
-                    && abs($_->{oldCounter} - $oldCounter) < 0.000001
-                    && $newCounter >= ($_->{newCounter} // 0)
-            } @{$data->{meterChanges} // []};
-            return 0 unless @changes == 1;
-            $consumption = $newCounter - $changes[0]{newCounter};
+            $data->{meter}{powerCurrent} = 0;
         }
         my $elapsed = $now - ($data->{meter}{lastTimestamp} // $now);
-        $data->{meter}{powerCurrent} = $elapsed > 0
+        $data->{meter}{powerCurrent} = $consumption >= 0 && $elapsed > 0
             ? 0 + sprintf('%.2f', $consumption * 3600 / $elapsed) : 0;
     } else {
         $data->{meter}{powerCurrent} = 0;
@@ -196,27 +188,9 @@ sub cm_meterEditChange {
     return 0 unless ref($entry) eq 'HASH';
 
 
-    # Reordering a dated event could invalidate intervening physical readings.
-    # Only permit date corrections that retain the event's position.
-    return 0 if $index > 0
-        && ($changes->[$index-1]{date} // '') gt $date;
-    return 0 if $index + 1 < @$changes
-        && ($changes->[$index+1]{date} // '') lt $date;
-
-    # Physical replacement corrections change historic usage directly.
-    # Only the latest event may have numeric edits, on its creation day.
-    my $numbersChanged =
-        (0 + $oldCounter) != (0 + ($entry->{oldCounter} // 0))
-        || (0 + $newCounter) != (0 + ($entry->{newCounter} // 0));
-    return 0 if $date ne ($entry->{date} // '');
-    if ($numbersChanged) {
-        return 0 if $index != $#$changes;
-        return 0 unless ($entry->{created} // '') =~ /^\d{4}-\d{2}-\d{2} /
-            && substr($entry->{created}, 0, 10) eq cm_today()
-            && $date eq cm_today();
-        return 0 if defined($data->{meter}{current})
-            && $data->{meter}{current} < $newCounter;
-    }
+    # Historical corrections are allowed regardless of entry age, position,
+    # or current live reading. The physical history calculation will flag
+    # inconsistent sequences until the remaining entries are corrected.
     # Every edited entry must have an explicit time; legacy entries can be
     # completed during editing without changing their physical counters.
     return 0 unless defined($effectiveAt) && length($effectiveAt);
