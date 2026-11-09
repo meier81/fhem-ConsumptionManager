@@ -254,7 +254,7 @@ sub ConsumptionManager_Set($@)
         return "Usage: set ".$a[0]." meterChangeApply <json>" if @a < 3;
         my $values = eval { JSON::PP->new->decode(join(' ', @a[2..$#a])) };
         return "Invalid meter change data" if $@ || ref($values) ne 'HASH';
-        my %allowed = map { $_ => 1 } qw(date oldCounter newCounter comment);
+        my %allowed = map { $_ => 1 } qw(date oldCounter newCounter comment effectiveAt);
         return "Invalid meter change field"
             if grep { !$allowed{$_} } keys %$values;
         my ($date, $old, $new) = @{$values}{qw(date oldCounter newCounter)};
@@ -264,9 +264,13 @@ sub ConsumptionManager_Set($@)
             && $old =~ /^\d+(?:\.\d+)?$/;
         return "Invalid new counter" unless defined $new
             && $new =~ /^\d+(?:\.\d+)?$/;
+        my $time = $values->{effectiveAt} // '';
+        return "Meter change time is required (HH:MM or HH:MM:SS)"
+            unless $time =~ /^\d{2}:\d{2}(?::\d{2})?$/;
+        $time .= ':00' if $time =~ /^\d{2}:\d{2}$/;
         return "Unable to save meter change"
             unless cm_coreRegisterMeterChange($hash, $date, $old, $new,
-                $values->{comment} // '');
+                $values->{comment} // '', "$date $time");
         ConsumptionManager_UpdateReadings($hash);
         return undef;
     }
@@ -274,7 +278,7 @@ sub ConsumptionManager_Set($@)
     if ($cmd eq 'meterChangeEdit') {
         return "Meter changes are managed on the water device"
             if ($hash->{MEDIUM} // '') eq 'wastewater';
-        return "Usage: set ".$a[0]." meterChangeEdit <index> <date> <oldCounter> <newCounter> [HH:MM[:SS]] [comment]"
+        return "Usage: set ".$a[0]." meterChangeEdit <index> <date> <oldCounter> <newCounter> <HH:MM[:SS]> [comment]"
             if @a < 6;
         my ($index, $date, $old, $new) = @a[2..5];
         my @tail = @a > 6 ? @a[6..$#a] : ();
@@ -284,6 +288,8 @@ sub ConsumptionManager_Set($@)
             $clock .= ':00' if $clock =~ /^\d{2}:\d{2}$/;
             $effectiveAt = "$date $clock";
         }
+        return "Meter change time is required (HH:MM or HH:MM:SS)"
+            unless defined $effectiveAt;
         my $comment = join(' ', @tail);
         my $data = cm_coreLoad($hash);
         return "Unable to load storage" unless $data;
@@ -368,7 +374,7 @@ sub ConsumptionManager_Set($@)
         return "Meter changes are managed on the water device"
             if ($hash->{MEDIUM} // '') eq 'wastewater';
 
-        return "Usage: set ".$a[0]." meterChange <YYYY-MM-DD> <oldCounter> <newCounter> [HH:MM[:SS]] [comment]"
+        return "Usage: set ".$a[0]." meterChange <YYYY-MM-DD> <oldCounter> <newCounter> <HH:MM[:SS]> [comment]"
             if (@a < 5);
 
         my ($date, $oldCounter, $newCounter) = @a[2, 3, 4];
@@ -379,6 +385,8 @@ sub ConsumptionManager_Set($@)
             $clock .= ':00' if $clock =~ /^\d{2}:\d{2}$/;
             $effectiveAt = "$date $clock";
         }
+        return "Meter change time is required (HH:MM or HH:MM:SS)"
+            unless defined $effectiveAt;
         my $comment = join(" ", @tail);
 
         return "Invalid date"
@@ -2344,7 +2352,7 @@ CM_ADVANCE_SCRIPT
             $html .= '<table class="block">';
             for my $field (
                 ['date', 'Wechseldatum', 'date'],
-                ['effectiveAt', 'Wechselzeit (HH:MM oder HH:MM:SS, optional)', 'text'],
+                ['effectiveAt', 'Wechselzeit (HH:MM oder HH:MM:SS, Pflicht)', 'text'],
                 ['oldCounter', 'Alter Endzählerstand', 'number'],
                 ['newCounter', 'Neuer Anfangszählerstand', 'number'],
                 ['comment', 'Kommentar (optional)', 'text'],
@@ -2357,7 +2365,7 @@ CM_ADVANCE_SCRIPT
                     . ' value="' . ConsumptionManager_FWHtml($key eq 'effectiveAt'
                         ? substr(($change->{effectiveAt} // ''), 11)
                         : ($change->{$key} // '')) . '"'
-                    . ($key ne 'comment' && $key ne 'effectiveAt' ? ' required' : '')
+                    . ($key ne 'comment' ? ' required' : '')
                     . '></td></tr>';
             }
             $html .= '</table><button type="submit">Änderungen speichern</button> '
@@ -2399,7 +2407,7 @@ CM_ADVANCE_SCRIPT
                 . '</td><td><input data-cm-meter-field="' . $key
                 . '" type="' . $type . '"'
                 . ($type eq 'number' ? ' step="any" min="0"' : '')
-                . ($key ne 'comment' && $key ne 'effectiveAt' ? ' required' : '')
+                . ($key ne 'comment' ? ' required' : '')
                 . '></td></tr>';
         }
         $html .= '</table><button type="submit">Zählerwechsel speichern</button> '
@@ -2466,14 +2474,14 @@ function cmMeterSubmit(form) {
     var comment = (values.comment || '').replace(/[\r\n]+/g, ' ').trim();
     var editIndex = form.querySelector('.cmMeterIndex');
     var time = (values.effectiveAt || '').trim();
-    if (time && !/^\d{2}:\d{2}(?::\d{2})?$/.test(time)) {
+    if (!/^\d{2}:\d{2}(?::\d{2})?$/.test(time)) {
         alert('Uhrzeit bitte als HH:MM oder HH:MM:SS eingeben.');
         return false;
     }
     form.elements.cmd.value = 'set ' + device
         + (editIndex ? ' meterChangeEdit ' + editIndex.value : ' meterChange')
         + ' ' + values.date + ' ' + values.oldCounter + ' ' + values.newCounter
-        + (time ? ' ' + time : '') + (comment ? ' ' + comment : '');
+        + ' ' + time + (comment ? ' ' + comment : '');
     return true;
 }
 </script>
@@ -2534,9 +2542,9 @@ Anzeigeattribut <code>consumptionUnit</code>.</p>
   physischen Zählerstand manuell übernehmen (nicht für Abwasser).</li>
   <li><code>set &lt;name&gt; counterBoundary &lt;JJJJ-MM-TT&gt; &lt;wert&gt;</code>:
   physischen Zählerstand für eine Tagesgrenze hinterlegen (nicht für Abwasser).</li>
-  <li><code>set &lt;name&gt; meterChange &lt;JJJJ-MM-TT&gt; &lt;alt&gt; &lt;neu&gt; [HH:MM[:SS]] [Kommentar]</code>:
+  <li><code>set &lt;name&gt; meterChange &lt;JJJJ-MM-TT&gt; &lt;alt&gt; &lt;neu&gt; &lt;HH:MM[:SS]&gt; [Kommentar]</code>:
   Zählerwechsel erfassen (nicht für Abwasser).</li>
-  <li><code>set &lt;name&gt; meterChangeEdit &lt;index&gt; &lt;JJJJ-MM-TT&gt; &lt;alt&gt; &lt;neu&gt; [HH:MM[:SS]] [Kommentar]</code>:
+  <li><code>set &lt;name&gt; meterChangeEdit &lt;index&gt; &lt;JJJJ-MM-TT&gt; &lt;alt&gt; &lt;neu&gt; &lt;HH:MM[:SS]&gt; [Kommentar]</code>:
   erfassten Zählerwechsel korrigieren.</li>
   <li><code>meterChangeApply</code>: technischer Speicherbefehl der
   grafischen Zählerwechselmaske.</li>
