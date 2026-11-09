@@ -79,8 +79,18 @@ sub cm_meterUpdate {
             $data->{meter}{powerCurrent} = 0;
         }
         my $elapsed = $now - ($data->{meter}{lastTimestamp} // $now);
-        $data->{meter}{powerCurrent} = $consumption >= 0 && $elapsed > 0
-            ? 0 + sprintf('%.2f', $consumption * 3600 / $elapsed) : 0;
+        # A replacement can also jump upwards. Never interpret the
+        # discontinuity as instantaneous consumption or flow.
+        my $previousAt = $data->{meter}{lastUpdate} // '';
+        my $currentAt = cm_timestamp();
+        my $replacementBetweenSamples = grep {
+            ref($_) eq 'HASH'
+                && ($_->{effectiveAt} // '') gt $previousAt
+                && ($_->{effectiveAt} // '') le $currentAt
+        } @{ $data->{meterChanges} // [] };
+        $data->{meter}{powerCurrent} =
+            !$replacementBetweenSamples && $consumption >= 0 && $elapsed > 0
+                ? 0 + sprintf('%.2f', $consumption * 3600 / $elapsed) : 0;
     } else {
         $data->{meter}{powerCurrent} = 0;
     }
@@ -148,9 +158,6 @@ sub cm_meterRegisterChange {
     for my $entry (@{ $data->{meterChanges} }) {
         next unless ref($entry) eq 'HASH';
         return 0 if ($entry->{effectiveAt} // '') eq $effectiveAt;
-        return 0 if (($entry->{date} // '') eq $date)
-            && (($entry->{oldCounter} // -1) == $oldCounter)
-            && (($entry->{newCounter} // -1) == $newCounter);
     }
 
     push @{$data->{meterChanges}}, {
