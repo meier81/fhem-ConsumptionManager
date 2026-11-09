@@ -36,6 +36,20 @@ sub _boundary {
     # Explicitly estimated post-restart readings are allowed, with provenance.
     return undef if ($entry->{source} // '') eq 'lastKnownReading'
         && ($entry->{observedAt} // '') ge ($date . ' 00:00:00');
+    # A carried-forward reading is not a valid midnight boundary if a
+    # documented replacement happened after the last actual observation.
+    if (($entry->{boundaryExact} // 0) == 0) {
+        my $observed = $entry->{observedAt} // '';
+        my $boundaryAt = "$date 00:00:00";
+        if ($observed ne '') {
+            for my $change (@{ $data->{meterChanges} // [] }) {
+                next unless ref($change) eq 'HASH';
+                my $at = $change->{effectiveAt} // '';
+                return undef if $at ne '' && $at gt $observed
+                    && $at le $boundaryAt;
+            }
+        }
+    }
     return $entry;
 }
 
@@ -124,6 +138,14 @@ sub cm_counterHistoryCalculateCurrent {
         # observation. Only carry it forward as zero consumption when the
         # unchanged live counter confirms that same known value.
         return undef unless 0 + $data->{meter}{current} == 0 + $start->{counter};
+        # No observed sample after the opening boundary: a documented
+        # replacement invalidates the apparent zero-usage assumption.
+        for my $change (@{ $data->{meterChanges} // [] }) {
+            next unless ref($change) eq 'HASH';
+            my $at = $change->{effectiveAt} // '';
+            return undef if $at ne '' && $at gt $observed
+                && $at <= $boundaryAt;
+        }
         return _calculate($data, $boundaryAt, $boundaryAt,
             $start->{counter}, $start->{counter},
             'physicalBoundaryAndStaleReading');
