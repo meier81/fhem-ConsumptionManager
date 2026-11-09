@@ -246,12 +246,9 @@ sub _cm_billingBaseForDays {
 
     my $base = $tariff->{basePrice} // 0;
     my $unit = $tariff->{basePriceUnit} // '';
-    my ($year) = $date =~ /^(\d{4})-/;
-    my $yearDays = _cm_billingLeapYear($year) ? 366 : 365;
-
-    return (($base * 12) / $yearDays) * $days if $unit eq 'month';
-    return ($base / $yearDays) * $days if $unit eq 'year';
-    return undef;
+    return undef unless $unit eq 'month' || $unit eq 'year';
+    my $annual = $unit eq 'month' ? $base * 12 : $base;
+    return _cm_billingAnnualProrated($annual, $days, $date);
 }
 
 sub _cm_billingAnnualAreaForDays {
@@ -259,11 +256,31 @@ sub _cm_billingAnnualAreaForDays {
     return undef unless defined $days && $days >= 0;
     return undef unless _cm_billingNumber($area) && _cm_billingNumber($price);
 
-    my ($year) = $date =~ /^(\d{4})-/;
-    return undef unless defined $year;
-    my $yearDays = _cm_billingLeapYear($year) ? 366 : 365;
+    return _cm_billingAnnualProrated($area * $price, $days, $date);
+}
 
-    return (($area * $price) / $yearDays) * $days;
+# Prorate recurring annual charges separately for each calendar year.
+# A segment crossing 31 December must use the correct denominator on
+# both sides, especially when one of those years is a leap year.
+sub _cm_billingAnnualProrated {
+    my ($annual, $days, $date) = @_;
+    return undef unless defined($days) && $days >= 0
+        && defined($date) && $date =~ /^(\d{4})-(\d{2})-(\d{2})$/
+        && defined cm_dateCompare($date, $date);
+    my $remaining = $days;
+    my $cursor = $date;
+    my $total = 0;
+    while ($remaining > 0) {
+        my ($year) = $cursor =~ /^(\d{4})-/;
+        my $nextYear = sprintf('%04d-01-01', $year + 1);
+        my $available = cm_dateDiffDays($cursor, $nextYear);
+        return undef unless defined($available) && $available > 0;
+        my $take = $remaining < $available ? $remaining : $available;
+        $total += $annual * $take / (_cm_billingLeapYear($year) ? 366 : 365);
+        $remaining -= $take;
+        $cursor = $nextYear;
+    }
+    return $total;
 }
 
 sub _cm_billingLeapYear {
