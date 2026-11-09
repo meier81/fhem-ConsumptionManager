@@ -1721,6 +1721,7 @@ sub ConsumptionManager_PruneCounterHistory {
     # period calculations; keep those independently of daily retention.
     # Also retain custom billing-year boundaries and snapshots needed
     # for tariff boundaries or meter changes, regardless of source.
+    # User-entered manual boundaries remain until explicitly deleted.
     my $billingMonth = AttrVal($hash->{NAME}, 'billingYearStart', '01');
     $billingMonth = '01' unless $billingMonth =~ /^(?:0[1-9]|1[0-2])$/;
 
@@ -1752,7 +1753,8 @@ sub ConsumptionManager_PruneCounterHistory {
                 my $isBilling = $isMonth && substr($date, 5, 2) eq $billingMonth;
                 my $hasProtectedKind = ref($entry->{kinds}) eq 'ARRAY'
                     && grep { $_ eq 'tariff' || $_ eq 'meterChange' } @{ $entry->{kinds} };
-                $hasProtectedKind || $protectedDates{$date}
+                ($entry->{source} // '') eq 'manual'
+                    || $hasProtectedKind || $protectedDates{$date}
                     || ($days && $date ge $dayLimit)
                     || ($months && $isMonth && $date ge $monthLimit)
                     || ($years && $isYear && $date ge $yearLimit)
