@@ -1598,7 +1598,7 @@ sub ConsumptionManager_UpdateReadings {
         }
     }
 
-    my $billingResult = cm_billingCalculatePhysicalYear($data);
+    my $billingResult = cm_billingCalculatePhysicalBillingYear($data, $billingMonth);
     if (($hash->{MEDIUM} // '') eq 'wastewater') {
         my $validBilling = ref($billingResult) eq 'HASH'
             && ($billingResult->{status} // '') eq 'active';
