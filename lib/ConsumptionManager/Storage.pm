@@ -24,6 +24,7 @@ our @EXPORT_OK = qw(
     cm_storageCreate
     cm_storageLoad
     cm_storageSave
+    cm_storageRename
 );
 
 our $VERSION = CM_VERSION;
@@ -59,6 +60,58 @@ sub cm_storageFilename {
     $storage_dir =~ s{[\\/]+$}{};
 
     return File::Spec->catfile($storage_dir, "ConsumptionManager_${device}.json");
+}
+
+
+# Move a device's JSON and backup together. Never overwrite another device's data.
+# The FHEM RenameFn runs after NAME has been changed.
+sub cm_storageRename {
+    my ($hash, $old_name) = @_;
+    return 'Missing old device name' unless defined $old_name && length $old_name;
+    my $new_name = $hash->{NAME};
+    return 'Missing new device name' unless defined $new_name && length $new_name;
+    return undef if $old_name eq $new_name;
+
+    my %old_hash = %{$hash};
+    $old_hash{NAME} = $old_name;
+    my $old_file = cm_storageFilename(\%old_hash);
+    my $new_file = cm_storageFilename($hash);
+    return 'Invalid storage filename' unless defined $old_file && defined $new_file;
+    return undef if $old_file eq $new_file;
+    return "Storage file for '$old_name' does not exist: $old_file" unless -f $old_file;
+
+    my @moves = ([$old_file, $new_file]);
+    push @moves, ["$old_file.bak", "$new_file.bak"] if -f "$old_file.bak";
+    for my $move (@moves) {
+        return "Destination already exists: $move->[1]" if -e $move->[1];
+    }
+
+    my @completed;
+    for my $move (@moves) {
+        unless (rename($move->[0], $move->[1])) {
+            my $error = "$!";
+            for my $done (reverse @completed) {
+                warn "Unable to roll back storage rename: $!" unless rename($done->[1], $done->[0]);
+            }
+            return "Unable to rename storage '$move->[0]': $error";
+        }
+        push @completed, $move;
+    }
+
+    # Update the embedded device identity while preserving all existing data.
+    my $data = cm_storageLoad($hash);
+    unless ($data) {
+        for my $done (reverse @completed) {
+            warn "Unable to roll back storage rename: $!" unless rename($done->[1], $done->[0]);
+        }
+        return 'Unable to read renamed storage; file move rolled back';
+    }
+    $data->{device}{name} = $new_name;
+    unless (cm_storageSave($hash, $data)) {
+        warn "Unable to persist renamed device identity for '$new_name'";
+        return 'Storage moved, but unable to update embedded device name';
+    }
+    return undef;
 }
 
 sub cm_storageCreate {
