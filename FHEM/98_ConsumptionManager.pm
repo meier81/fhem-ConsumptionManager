@@ -29,7 +29,8 @@ use ConsumptionManager::Core qw(
     cm_coreRegisterMeterChange
 );
 
-use ConsumptionManager::Meter qw(cm_meterEditChange);
+use ConsumptionManager::Storage qw(cm_storageRename);
+\nuse ConsumptionManager::Meter qw(cm_meterEditChange);
 
 use ConsumptionManager::CounterHistory qw(cm_counterHistoryCalculateCurrent cm_counterHistoryCalculateRange);
 
@@ -100,6 +101,7 @@ sub ConsumptionManager_Initialize($)
 
     $hash->{DefFn}    = 'ConsumptionManager_Define';
     $hash->{UndefFn}  = 'ConsumptionManager_Undef';
+    $hash->{RenameFn} = 'ConsumptionManager_Rename';
     $hash->{SetFn}    = 'ConsumptionManager_Set';
     $hash->{GetFn}    = 'ConsumptionManager_Get';
     $hash->{AttrFn}   = 'ConsumptionManager_Attr';
@@ -158,6 +160,12 @@ sub ConsumptionManager_Define($$)
     ConsumptionManager_ScheduleMidnight($hash);
 
     return undef;
+}
+
+sub ConsumptionManager_Rename($)
+{
+    my ($hash, $old_name) = @_;
+    return cm_storageRename($hash, $old_name);
 }
 
 sub ConsumptionManager_Undef($)
