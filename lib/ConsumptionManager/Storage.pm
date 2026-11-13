@@ -67,6 +67,7 @@ sub cm_storageFilename {
 # The FHEM RenameFn runs after NAME has been changed.
 sub cm_storageRename {
     my ($hash, $old_name) = @_;
+    return 'Invalid device reference' unless ref($hash) eq 'HASH';
     return 'Missing old device name' unless defined $old_name && length $old_name;
     my $new_name = $hash->{NAME};
     return 'Missing new device name' unless defined $new_name && length $new_name;
