@@ -1,4 +1,4 @@
-## 1.1.0 - 2026-11-13
+## 1.1.0-dev6 - in Entwicklung
 
 - Neues Attribut `billingYearStart` (01 bis 12; Standard 01).
 - Verbrauchs- und Kostenreadings für laufendes und vorheriges Abrechnungsjahr.
@@ -8,6 +8,7 @@
 - Deutsche FHEM-Hilfe um Standardwerte und zulässige Bereiche der Attribute ergänzt.
 - Selektive Bereinigung der physischen Zählerstandshistorie aktiviert: tägliche, monatliche und jährliche Fristen mit Erhalt der benötigten Tarif-, Zählerwechsel- und Abrechnungsjahresgrenzen; manuelle und automatische Stichtage unterliegen denselben Fristen.
 - FHEMWEB-Zählerstandsverwaltung: manuellen Stichtag anlegen/bearbeiten/löschen, automatische Werte bleiben nicht editierbar; keine individuelle Schutz-Checkbox.
+- Abwasser-Readings werden nach FHEM INITIALIZED erneut aus dem verknüpften Wasser-Device aufgebaut, auch wenn die Quelle beim Define noch nicht verfügbar war.
 - Geräteumbenennung übernimmt JSON und Sicherungsdatei; gespeicherte Geräteidentität wird angepasst.
 - Atomarer Austausch der JSON-Datei, Erhalt vorhandener Dateiberechtigungen und unveränderte Sicherung bei Umbenennung.
 - FHEM-Praxistests: Abrechnungsjahr, Umbenennung und Rückbenennung, Neustart, Sicherungs-Prüfsumme und Schreibberechtigungen.
