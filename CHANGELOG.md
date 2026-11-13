@@ -1,4 +1,4 @@
-## 1.1.0-dev6 - in Entwicklung
+## 1.1.0 - 2026-11-13
 
 - Neues Attribut `billingYearStart` (01 bis 12; Standard 01).
 - Verbrauchs- und Kostenreadings für laufendes und vorheriges Abrechnungsjahr.
@@ -11,7 +11,7 @@
 - Abwasser-Readings werden nach FHEM INITIALIZED erneut aus dem verknüpften Wasser-Device aufgebaut, auch wenn die Quelle beim Define noch nicht verfügbar war.
 - Geräteumbenennung übernimmt JSON und Sicherungsdatei; gespeicherte Geräteidentität wird angepasst.
 - Atomarer Austausch der JSON-Datei, Erhalt vorhandener Dateiberechtigungen und unveränderte Sicherung bei Umbenennung.
-- FHEM-Praxistests: Abrechnungsjahr, Umbenennung und Rückbenennung, Neustart, Sicherungs-Prüfsumme und Schreibberechtigungen.
+- FHEM-Praxistests: Abrechnungsjahr, Umbenennung und Rückbenennung, Neustart, Sicherungs-Prüfsumme und Schreibberechtigungen; Abwasser-Initialisierung mit neu angelegtem Gerät nach Neustart bestätigt.
 - Vollständige automatisierte Regressionstests aller Funktionen stehen weiterhin aus.
 
 ## 1.0.0 - 2026-11-01
