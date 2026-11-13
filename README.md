@@ -1,4 +1,4 @@
-# FHEM ConsumptionManager 1.1.0-dev6
+# FHEM ConsumptionManager 1.1.0
 
 ConsumptionManager ist ein FHEM-Modul zur Berechnung und Verwaltung von Strom-, Gas-, Wasser- und Abwasserverbrauch, Kosten, Tarifen, Abschlägen und Zählerwechseln.
 
@@ -27,7 +27,7 @@ Tarife und Abschläge werden datumsbezogen gespeichert. Die Abschlagsverwaltung 
 
 ## Hinweise
 
-Die Version 1.0.0 verwendet das interne Datenschema 15. Vor dem Update ein Backup erstellen; ein Downgrade ist nicht automatisch abgesichert. Der reale Monatswechsel Oktober/November 2026 wurde für alle vier Medien geprüft. Ein vollständiger Praxistest des Jahreswechsels steht noch aus.
+Die Version 1.1.0 verwendet weiterhin das interne Datenschema 15. Vor dem Update ein Backup erstellen; ein Downgrade ist nicht automatisch abgesichert. Der reale Monatswechsel Oktober/November 2026 wurde für alle vier Medien geprüft. Ein vollständiger Praxistest des Jahreswechsels steht noch aus. Die automatische Initialisierung von Abwassergeräten nach einem FHEM-Neustart wurde mit einem neu angelegten Testgerät geprüft.
 
 Weitere Änderungen siehe [CHANGELOG.md](CHANGELOG.md).
 
