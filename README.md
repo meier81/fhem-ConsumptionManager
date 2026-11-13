@@ -1,4 +1,4 @@
-# FHEM ConsumptionManager 1.1.0
+# FHEM ConsumptionManager 1.1.0-dev6
 
 ConsumptionManager ist ein FHEM-Modul zur Berechnung und Verwaltung von Strom-, Gas-, Wasser- und Abwasserverbrauch, Kosten, Tarifen, Abschlägen und Zählerwechseln.
 
