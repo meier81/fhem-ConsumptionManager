@@ -6,6 +6,7 @@ use JSON::PP;
 use File::Copy;
 use File::Path qw(make_path);
 use File::Spec;
+use File::Temp qw(tempfile);
 use Exporter 'import';
 
 use ConsumptionManager::Constants qw(
@@ -108,9 +109,11 @@ sub cm_storageRename {
         return 'Unable to read renamed storage; file move rolled back';
     }
     $data->{device}{name} = $new_name;
-    unless (cm_storageSave($hash, $data)) {
-        warn "Unable to persist renamed device identity for '$new_name'";
-        return 'Storage moved, but unable to update embedded device name';
+    unless (cm_storageSave($hash, $data, { skipBackup => 1 })) {
+        for my $done (reverse @completed) {
+            warn "Unable to roll back storage rename: $!" unless rename($done->[1], $done->[0]);
+        }
+        return 'Unable to update renamed device identity; file move rolled back';
     }
     return undef;
 }
@@ -207,52 +210,68 @@ sub cm_storageLoad {
 }
 
 sub cm_storageSave {
-    my ($hash, $data) = @_;
+    my ($hash, $data, $options) = @_;
 
     my $filename = cm_storageFilename($hash);
     return 0 unless defined $filename;
     return 0 unless defined $data && ref $data eq 'HASH';
+    $options ||= {};
+
     $data->{meta} ||= {};
     $data->{meta}{modified} = cm_timestamp();
 
-    my $dir = File::Spec->catpath((File::Spec->splitpath($filename))[0,1]);
-    make_path($dir) unless -d $dir;
-
-    _cm_storageBackup($hash) if -f $filename;
-
-    my $json = JSON::PP->new->pretty->canonical;
-    my $json_text = eval { $json->encode($data) };
+    my $json_text = eval { JSON::PP->new->pretty->canonical->encode($data) };
     if ($@) {
         warn "Unable to encode data to JSON: $@";
         return 0;
     }
 
-    open my $fh, '>:encoding(UTF-8)', $filename
-        or do {
-            warn "Unable to open storage file '$filename' for writing: $!";
-            return 0;
-        };
+    my $dir = File::Spec->catpath((File::Spec->splitpath($filename))[0,1]);
+    eval { make_path($dir) unless -d $dir; 1 } or do {
+        warn "Unable to create storage directory '$dir': $@";
+        return 0;
+    };
 
-    print $fh $json_text;
-    close $fh;
-
-    return 1;
-}
-
-sub _cm_storageBackup {
-    my ($hash) = @_;
-
-    my $filename = cm_storageFilename($hash);
-    return 0 unless defined $filename;
-    return 0 unless -f $filename;
-
-    my $backup_file = "$filename.bak";
-    if (copy($filename, $backup_file)) {
-        return 1;
+    # Write a complete replacement in the same directory before touching
+    # the existing file. A failed write must never truncate the live JSON.
+    my ($fh, $tmp) = tempfile('.cm-write-XXXXXX', DIR => $dir, UNLINK => 0);
+    unless ($fh && defined $tmp) {
+        warn "Unable to create temporary storage file in '$dir': $!";
+        return 0;
+    }
+    binmode($fh, ':encoding(UTF-8)');
+    my $written = print {$fh} $json_text;
+    my $closed = close($fh);
+    unless ($written && $closed) {
+        warn "Unable to write temporary storage file '$tmp': $!";
+        unlink($tmp);
+        return 0;
     }
 
-    warn "Unable to create backup file '$backup_file': $!";
-    return 0;
+    # Back up the previous complete JSON without ever truncating the
+    # existing backup. Rename operations preserve their original .bak.
+    if (-f $filename && !$options->{skipBackup}) {
+        my ($bak_fh, $bak_tmp) = tempfile('.cm-backup-XXXXXX', DIR => $dir, UNLINK => 0);
+        unless ($bak_fh && defined $bak_tmp) {
+            warn "Unable to create temporary backup file in '$dir': $!";
+            unlink($tmp);
+            return 0;
+        }
+        close($bak_fh);
+        unless (copy($filename, $bak_tmp) && rename($bak_tmp, "$filename.bak")) {
+            warn "Unable to update backup '$filename.bak': $!";
+            unlink($bak_tmp);
+            unlink($tmp);
+            return 0;
+        }
+    }
+
+    unless (rename($tmp, $filename)) {
+        warn "Unable to replace storage file '$filename': $!";
+        unlink($tmp);
+        return 0;
+    }
+    return 1;
 }
 
 sub cm_storageValidate {
