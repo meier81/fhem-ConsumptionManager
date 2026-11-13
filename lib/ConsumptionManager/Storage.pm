@@ -239,6 +239,19 @@ sub cm_storageSave {
         warn "Unable to create temporary storage file in '$dir': $!";
         return 0;
     }
+    # Preserve permissions of an existing storage file. New files use 0640
+    # (subject to the process umask), rather than tempfile's default 0600.
+    my $mode = 0640;
+    if (-e $filename) {
+        my @stat = stat($filename);
+        $mode = $stat[2] & 07777 if @stat;
+    }
+    unless (chmod($mode, $tmp)) {
+        warn "Unable to set permissions on temporary storage file '$tmp': $!";
+        close($fh);
+        unlink($tmp);
+        return 0;
+    }
     binmode($fh, ':encoding(UTF-8)');
     my $written = print {$fh} $json_text;
     my $closed = close($fh);
