@@ -165,7 +165,12 @@ sub ConsumptionManager_Define($$)
 
 sub ConsumptionManager_Rename($)
 {
-    my ($hash, $old_name) = @_;
+    my ($new_name, $old_name) = @_;
+    return 'Invalid device names' if ref($new_name) || ref($old_name);
+    return 'Missing new device name' unless defined $new_name && length $new_name;
+    return 'Missing old device name' unless defined $old_name && length $old_name;
+    my $hash = $defs{$new_name};
+    return "Device '$new_name' not found" unless ref($hash) eq 'HASH';
     return cm_storageRename($hash, $old_name);
 }
 
