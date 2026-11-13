@@ -234,7 +234,7 @@ sub cm_storageSave {
 
     # Write a complete replacement in the same directory before touching
     # the existing file. A failed write must never truncate the live JSON.
-    my ($fh, $tmp) = tempfile('.cm-write-XXXXXX', DIR => $dir, UNLINK => 0);
+    my ($fh, $tmp) = eval { tempfile('.cm-write-XXXXXX', DIR => $dir, UNLINK => 0) };
     unless ($fh && defined $tmp) {
         warn "Unable to create temporary storage file in '$dir': $!";
         return 0;
@@ -251,7 +251,7 @@ sub cm_storageSave {
     # Back up the previous complete JSON without ever truncating the
     # existing backup. Rename operations preserve their original .bak.
     if (-f $filename && !$options->{skipBackup}) {
-        my ($bak_fh, $bak_tmp) = tempfile('.cm-backup-XXXXXX', DIR => $dir, UNLINK => 0);
+        my ($bak_fh, $bak_tmp) = eval { tempfile('.cm-backup-XXXXXX', DIR => $dir, UNLINK => 0) };
         unless ($bak_fh && defined $bak_tmp) {
             warn "Unable to create temporary backup file in '$dir': $!";
             unlink($tmp);
