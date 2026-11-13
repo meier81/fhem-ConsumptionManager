@@ -30,7 +30,8 @@ use ConsumptionManager::Core qw(
 );
 
 use ConsumptionManager::Storage qw(cm_storageRename);
-\nuse ConsumptionManager::Meter qw(cm_meterEditChange);
+
+use ConsumptionManager::Meter qw(cm_meterEditChange);
 
 use ConsumptionManager::CounterHistory qw(cm_counterHistoryCalculateCurrent cm_counterHistoryCalculateRange);
 
