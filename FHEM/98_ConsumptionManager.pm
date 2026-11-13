@@ -1217,6 +1217,13 @@ sub ConsumptionManager_Notify($$)
                 }
                 CommandDeleteAttr(undef, "$name powerTimeout");
             }
+            # At Define time, the linked water device and its attributes may
+            # not be available yet. Refresh derived wastewater readings once
+            # FHEM has completed loading its configuration.
+            if (($hash->{MEDIUM} // '') eq 'wastewater'
+                && !AttrVal($name, 'disable', 0)) {
+                ConsumptionManager_UpdateReadings($hash);
+            }
         }
         return undef;
     }
