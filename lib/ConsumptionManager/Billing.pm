@@ -24,6 +24,7 @@ our @EXPORT_OK = qw(
     cm_billingScheduledAdvances
     cm_billingCalculatePhysicalPeriod
     cm_billingCalculatePhysicalYear
+    cm_billingCalculatePhysicalBillingYear
 );
 
 our $VERSION = CM_VERSION;
@@ -91,13 +92,18 @@ sub cm_billingCalculatePhysicalPeriod {
         unless ref($physical) eq 'HASH';
 
     my $endDay = $physical->{endDate};
+    # A live meter reading can be older than today. Consumption ends at
+    # the last observation, but recurring charges run through today.
+    my $billingEndDay = defined($endDate) ? $endDay : cm_today();
+    my $observedAt = !defined($endDate) ? ($data->{meter}{lastUpdate} // '') : '';
+    my $observedDay = $observedAt =~ /^(\d{4}-\d{2}-\d{2}) / ? $1 : '';
     my @tariffStarts = sort map { $_->{validFrom} }
         grep { ref($_) eq 'HASH'
             && defined($_->{validFrom})
             && $_->{validFrom} gt $startDate
             && (defined($endDate)
                 ? $_->{validFrom} lt $endDay
-                : $_->{validFrom} le $endDay)
+                : $_->{validFrom} le $billingEndDay)
         } @{ $data->{tariffs} // [] };
     # Two tariff definitions with the same start date would otherwise
     # produce a zero-length interval and ambiguous billing.
@@ -114,13 +120,37 @@ sub cm_billingCalculatePhysicalPeriod {
     for my $i (0 .. $#dates) {
         my $from = $dates[$i];
         my $to = $i < $#dates ? $dates[$i+1] : undef;
-        my $segment = $i == 0 && !defined($to)
-            ? $physical
-            : defined($to)
-                ? cm_counterHistoryCalculateRange($data, $from, $to)
-                : defined($endDate)
-                    ? cm_counterHistoryCalculateRange($data, $from, $endDate)
-                    : cm_counterHistoryCalculateCurrent($data, $from);
+        my $segment;
+        if (!defined($endDate) && $observedDay ne ''
+            && $from gt $observedDay) {
+            # The tariff starts after the last physical observation.
+            # Charge recurring costs, but never extrapolate meter usage.
+            # A replacement since that observation makes the assumption
+            # of an unchanged physical meter unsafe.
+            my $unobservedChange = grep {
+                ref($_) eq 'HASH'
+                    && ($_->{date} // '') ge $observedDay
+            } @{ $data->{meterChanges} // [] };
+            return { status => 'incomplete', error => 'unobservedMeterChange' }
+                if $unobservedChange;
+            $segment = { consumption => 0, segments => [] };
+        }
+        elsif (!defined($endDate) && defined($to)
+            && $observedDay ne '' && $to gt $observedDay) {
+            # The next tariff begins after the last observed reading.
+            # Assign only measured usage to the preceding tariff.
+            $segment = $i == 0 ? $physical
+                : cm_counterHistoryCalculateCurrent($data, $from);
+        }
+        else {
+            $segment = $i == 0 && !defined($to)
+                ? $physical
+                : defined($to)
+                    ? cm_counterHistoryCalculateRange($data, $from, $to)
+                    : defined($endDate)
+                        ? cm_counterHistoryCalculateRange($data, $from, $endDate)
+                        : cm_counterHistoryCalculateCurrent($data, $from);
+        }
         return { status => 'incomplete', error => 'missingPhysicalTariffBoundary',
                  boundary => $from }
             unless ref($segment) eq 'HASH';
@@ -135,7 +165,7 @@ sub cm_billingCalculatePhysicalPeriod {
         # For a live reading, the current calendar day is included.
         my $days = defined($to) ? cm_dateDiffDays($from, $to)
             : defined($endDate) ? cm_dateDiffDays($from, $endDate)
-            : cm_dateDiffDays($from, $endDay) + 1;
+            : cm_dateDiffDays($from, $billingEndDay) + 1;
         return undef unless defined($days) && $days >= 0;
         my $work = $converted * ($tariff->{workPrice} // 0);
         my $base = _cm_billingBaseForDays($tariff, $days, $from);
@@ -149,7 +179,7 @@ sub cm_billingCalculatePhysicalPeriod {
             && defined($surfaceUsage) && defined($surfaceRecurring);
 
         push @results, {
-            startDate => $from, endDate => $to // $endDay,
+            startDate => $from, endDate => $to // $billingEndDay,
             days => $days,
             counterConsumption => $segment->{consumption},
             billingConsumption => $converted,
@@ -169,7 +199,7 @@ sub cm_billingCalculatePhysicalPeriod {
     }
     return {
         status => 'active', source => 'physicalReadings',
-        startDate => $startDate, endDate => $endDay,
+        startDate => $startDate, endDate => $billingEndDay,
         counterConsumption => $usage,
         billingConsumption => $billed,
         workCost => $workTotal, baseCost => $baseTotal,
@@ -208,6 +238,33 @@ sub cm_billingCalculatePhysicalYear {
     };
 }
 
+# Current custom billing year, beginning on day one of the selected month.
+sub cm_billingCalculatePhysicalBillingYear {
+    my ($data, $startMonth, $asOfDate) = @_;
+    return undef unless ref($data) eq 'HASH';
+    $startMonth = '01' unless defined($startMonth) && length($startMonth);
+    return undef unless $startMonth =~ /^(?:0[1-9]|1[0-2])$/;
+    $asOfDate = cm_today() unless defined($asOfDate) && length($asOfDate);
+    return undef unless defined cm_dateCompare($asOfDate, $asOfDate);
+    return undef unless $asOfDate eq cm_today();
+    my ($year, $month) = $asOfDate =~ /^(\d{4})-(\d{2})-/;
+    my $startYear = $year - ($month < $startMonth ? 1 : 0);
+    my $startDate = sprintf('%04d-%s-01', $startYear, $startMonth);
+    my $result = cm_billingCalculatePhysicalPeriod($data, $startDate);
+    return $result unless ref($result) eq 'HASH'
+        && ($result->{status} // '') eq 'active';
+    my $advances = cm_billingScheduledAdvances($data, $startDate, $asOfDate);
+    return undef unless ref($advances) eq 'HASH';
+    return {
+        %$result,
+        startDate => $startDate,
+        calculatedTo => $asOfDate,
+        advanceAmount => $advances->{amount},
+        advanceCount => $advances->{count},
+        financialReserve => $advances->{amount} - $result->{totalCost},
+    };
+}
+
 sub _cm_billingBaseForDays {
     my ($tariff, $days, $date) = @_;
     return undef unless ref($tariff) eq 'HASH';
@@ -215,12 +272,9 @@ sub _cm_billingBaseForDays {
 
     my $base = $tariff->{basePrice} // 0;
     my $unit = $tariff->{basePriceUnit} // '';
-    my ($year) = $date =~ /^(\d{4})-/;
-    my $yearDays = _cm_billingLeapYear($year) ? 366 : 365;
-
-    return (($base * 12) / $yearDays) * $days if $unit eq 'month';
-    return ($base / $yearDays) * $days if $unit eq 'year';
-    return undef;
+    return undef unless $unit eq 'month' || $unit eq 'year';
+    my $annual = $unit eq 'month' ? $base * 12 : $base;
+    return _cm_billingAnnualProrated($annual, $days, $date);
 }
 
 sub _cm_billingAnnualAreaForDays {
@@ -228,11 +282,31 @@ sub _cm_billingAnnualAreaForDays {
     return undef unless defined $days && $days >= 0;
     return undef unless _cm_billingNumber($area) && _cm_billingNumber($price);
 
-    my ($year) = $date =~ /^(\d{4})-/;
-    return undef unless defined $year;
-    my $yearDays = _cm_billingLeapYear($year) ? 366 : 365;
+    return _cm_billingAnnualProrated($area * $price, $days, $date);
+}
 
-    return (($area * $price) / $yearDays) * $days;
+# Prorate recurring annual charges separately for each calendar year.
+# A segment crossing 31 December must use the correct denominator on
+# both sides, especially when one of those years is a leap year.
+sub _cm_billingAnnualProrated {
+    my ($annual, $days, $date) = @_;
+    return undef unless defined($days) && $days >= 0
+        && defined($date) && $date =~ /^(\d{4})-(\d{2})-(\d{2})$/
+        && defined cm_dateCompare($date, $date);
+    my $remaining = $days;
+    my $cursor = $date;
+    my $total = 0;
+    while ($remaining > 0) {
+        my ($year) = $cursor =~ /^(\d{4})-/;
+        my $nextYear = sprintf('%04d-01-01', $year + 1);
+        my $available = cm_dateDiffDays($cursor, $nextYear);
+        return undef unless defined($available) && $available > 0;
+        my $take = $remaining < $available ? $remaining : $available;
+        $total += $annual * $take / (_cm_billingLeapYear($year) ? 366 : 365);
+        $remaining -= $take;
+        $cursor = $nextYear;
+    }
+    return $total;
 }
 
 sub _cm_billingLeapYear {

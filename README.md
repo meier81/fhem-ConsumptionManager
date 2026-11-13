@@ -1,4 +1,4 @@
-# FHEM ConsumptionManager 1.0.0
+# FHEM ConsumptionManager 1.1.0
 
 ConsumptionManager ist ein FHEM-Modul zur Berechnung und Verwaltung von Strom-, Gas-, Wasser- und Abwasserverbrauch, Kosten, Tarifen, Abschlägen und Zählerwechseln.
 
@@ -27,6 +27,10 @@ Tarife und Abschläge werden datumsbezogen gespeichert. Die Abschlagsverwaltung 
 
 ## Hinweise
 
-Die Version 1.0.0 verwendet das interne Datenschema 15. Vor dem Update ein Backup erstellen; ein Downgrade ist nicht automatisch abgesichert. Der reale Monatswechsel Oktober/November 2026 wurde für alle vier Medien geprüft. Ein vollständiger Praxistest des Jahreswechsels steht noch aus.
+Die Version 1.1.0 verwendet weiterhin das interne Datenschema 15. Vor dem Update ein Backup erstellen; ein Downgrade ist nicht automatisch abgesichert. Der reale Monatswechsel Oktober/November 2026 wurde für alle vier Medien geprüft. Ein vollständiger Praxistest des Jahreswechsels steht noch aus. Die automatische Initialisierung von Abwassergeräten nach einem FHEM-Neustart wurde mit einem neu angelegten Testgerät geprüft.
 
 Weitere Änderungen siehe [CHANGELOG.md](CHANGELOG.md).
+
+## Version 1.1.0: Abrechnungsjahr und Datenspeicherung
+
+Mit `attr <Device> billingYearStart 05` beginnt das Abrechnungsjahr am 1. Mai und endet am 30. April des Folgejahres. Erlaubt sind die Monatswerte `01` bis `12`; ohne Attribut gilt `01`. Die Kalenderjahr-Readings bleiben erhalten. Ergänzt werden `consumptionBillingYear`, `consumptionLastBillingYear`, `costBillingYear` und `costLastBillingYear`. `get overview` und `get billing` verwenden den gewählten Abrechnungsbeginn; `get cost` zeigt beide Abrechnungsjahre. Geräteumbenennungen übernehmen die JSON-Datei und ihre Sicherung. Die Speicherung erfolgt über eine temporäre Datei; bestehende Dateiberechtigungen bleiben erhalten.

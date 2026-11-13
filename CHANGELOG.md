@@ -1,3 +1,19 @@
+## 1.1.0 - 2026-11-13
+
+- Neues Attribut `billingYearStart` (01 bis 12; Standard 01).
+- Verbrauchs- und Kostenreadings für laufendes und vorheriges Abrechnungsjahr.
+- Kalenderjahr-Auswertungen bleiben unverändert.
+- `get billing` und `get overview` zeigen die Abrechnung seit dem gewählten Abrechnungsbeginn einschließlich Abschlägen und Finanzreserve.
+- `get cost` ergänzt das aktuelle und vorherige Abrechnungsjahr.
+- Deutsche FHEM-Hilfe um Standardwerte und zulässige Bereiche der Attribute ergänzt.
+- Selektive Bereinigung der physischen Zählerstandshistorie aktiviert: tägliche, monatliche und jährliche Fristen mit Erhalt der benötigten Tarif-, Zählerwechsel- und Abrechnungsjahresgrenzen; manuelle und automatische Stichtage unterliegen denselben Fristen.
+- FHEMWEB-Zählerstandsverwaltung: manuellen Stichtag anlegen/bearbeiten/löschen, automatische Werte bleiben nicht editierbar; keine individuelle Schutz-Checkbox.
+- Abwasser-Readings werden nach FHEM INITIALIZED erneut aus dem verknüpften Wasser-Device aufgebaut, auch wenn die Quelle beim Define noch nicht verfügbar war.
+- Geräteumbenennung übernimmt JSON und Sicherungsdatei; gespeicherte Geräteidentität wird angepasst.
+- Atomarer Austausch der JSON-Datei, Erhalt vorhandener Dateiberechtigungen und unveränderte Sicherung bei Umbenennung.
+- FHEM-Praxistests: Abrechnungsjahr, Umbenennung und Rückbenennung, Neustart, Sicherungs-Prüfsumme und Schreibberechtigungen; Abwasser-Initialisierung mit neu angelegtem Gerät nach Neustart bestätigt.
+- Vollständige automatisierte Regressionstests aller Funktionen stehen weiterhin aus.
+
 ## 1.0.0 - 2026-11-01
 
 - Erste stabile Veröffentlichung des ConsumptionManager für Strom, Gas, Wasser und Abwasser.

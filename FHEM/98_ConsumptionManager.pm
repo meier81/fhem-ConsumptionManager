@@ -29,6 +29,8 @@ use ConsumptionManager::Core qw(
     cm_coreRegisterMeterChange
 );
 
+use ConsumptionManager::Storage qw(cm_storageRename);
+
 use ConsumptionManager::Meter qw(cm_meterEditChange);
 
 use ConsumptionManager::CounterHistory qw(cm_counterHistoryCalculateCurrent cm_counterHistoryCalculateRange);
@@ -65,6 +67,7 @@ use ConsumptionManager::Advance qw(
 use ConsumptionManager::Billing qw(
     cm_billingCalculatePhysicalPeriod
     cm_billingCalculatePhysicalYear
+    cm_billingCalculatePhysicalBillingYear
 );
 
 use ConsumptionManager::Utils qw(
@@ -99,6 +102,7 @@ sub ConsumptionManager_Initialize($)
 
     $hash->{DefFn}    = 'ConsumptionManager_Define';
     $hash->{UndefFn}  = 'ConsumptionManager_Undef';
+    $hash->{RenameFn} = 'ConsumptionManager_Rename';
     $hash->{SetFn}    = 'ConsumptionManager_Set';
     $hash->{GetFn}    = 'ConsumptionManager_Get';
     $hash->{AttrFn}   = 'ConsumptionManager_Attr';
@@ -115,6 +119,7 @@ sub ConsumptionManager_Initialize($)
         . ' counterReading'
         . ' counterMultiplier'
         . ' consumptionDecimals'
+        . ' billingYearStart:01,02,03,04,05,06,07,08,09,10,11,12'
         . ' dailyHistoryDays'
         . ' monthlyHistoryMonths'
         . ' yearlyHistoryYears'
@@ -156,6 +161,17 @@ sub ConsumptionManager_Define($$)
     ConsumptionManager_ScheduleMidnight($hash);
 
     return undef;
+}
+
+sub ConsumptionManager_Rename($)
+{
+    my ($new_name, $old_name) = @_;
+    return 'Invalid device names' if ref($new_name) || ref($old_name);
+    return 'Missing new device name' unless defined $new_name && length $new_name;
+    return 'Missing old device name' unless defined $old_name && length $old_name;
+    my $hash = $defs{$new_name};
+    return "Device '$new_name' not found" unless ref($hash) eq 'HASH';
+    return cm_storageRename($hash, $old_name);
 }
 
 sub ConsumptionManager_Undef($)
@@ -245,6 +261,37 @@ sub ConsumptionManager_Set($@)
         return undef;
     }
 
+    # Delete a dated tariff or advance by stable ID and matching start date.
+    # Do not renumber IDs or silently change neighbouring periods.
+    if ($cmd eq 'tariffDelete' || $cmd eq 'advanceDelete') {
+        return "Usage: set ".$a[0]." $cmd <id> <YYYY-MM-DD>"
+            unless @a == 4 && $a[2] =~ /^\d+$/
+                && $a[3] =~ /^\d{4}-\d{2}-\d{2}$/;
+        my $field = $cmd eq 'tariffDelete' ? 'tariffs' : 'advances';
+        my $data = cm_coreLoad($hash);
+        return "Unable to load storage" unless $data;
+        my $copy = eval { JSON::PP->new->decode(JSON::PP->new->encode($data)) };
+        return "Unable to copy storage" if $@ || ref($copy) ne 'HASH';
+        my $entries = $copy->{$field};
+        return "Entry not found" unless ref($entries) eq 'ARRAY';
+        my @matches = grep {
+            ref($_) eq 'HASH' && defined($_->{id})
+                && $_->{id} =~ /^\d+$/ && $_->{id} == $a[2]
+                && ($_->{validFrom} // '') eq $a[3]
+        } @$entries;
+        return "Entry not found or ambiguous" unless @matches == 1;
+        $copy->{$field} = [
+            grep {
+                !(ref($_) eq 'HASH' && defined($_->{id})
+                    && $_->{id} =~ /^\d+$/ && $_->{id} == $a[2]
+                    && ($_->{validFrom} // '') eq $a[3])
+            } @$entries
+        ];
+        return "Unable to save storage" unless cm_coreSave($hash, $copy);
+        ConsumptionManager_UpdateReadings($hash);
+        return undef;
+    }
+
     # Atomic FHEMWEB form for a physical meter replacement.
     if ($cmd eq 'meterChangeApply') {
         return "Meter changes are managed on the water device"
@@ -252,7 +299,7 @@ sub ConsumptionManager_Set($@)
         return "Usage: set ".$a[0]." meterChangeApply <json>" if @a < 3;
         my $values = eval { JSON::PP->new->decode(join(' ', @a[2..$#a])) };
         return "Invalid meter change data" if $@ || ref($values) ne 'HASH';
-        my %allowed = map { $_ => 1 } qw(date oldCounter newCounter comment);
+        my %allowed = map { $_ => 1 } qw(date oldCounter newCounter comment effectiveAt);
         return "Invalid meter change field"
             if grep { !$allowed{$_} } keys %$values;
         my ($date, $old, $new) = @{$values}{qw(date oldCounter newCounter)};
@@ -262,9 +309,36 @@ sub ConsumptionManager_Set($@)
             && $old =~ /^\d+(?:\.\d+)?$/;
         return "Invalid new counter" unless defined $new
             && $new =~ /^\d+(?:\.\d+)?$/;
+        my $time = $values->{effectiveAt} // '';
+        return "Meter change time is required (HH:MM or HH:MM:SS)"
+            unless $time =~ /^\d{2}:\d{2}(?::\d{2})?$/;
+        $time .= ':00' if $time =~ /^\d{2}:\d{2}$/;
         return "Unable to save meter change"
             unless cm_coreRegisterMeterChange($hash, $date, $old, $new,
-                $values->{comment} // '');
+                $values->{comment} // '', "$date $time");
+        ConsumptionManager_UpdateReadings($hash);
+        return undef;
+    }
+
+    if ($cmd eq 'meterChangeDelete') {
+        return "Meter changes are managed on the water device"
+            if ($hash->{MEDIUM} // '') eq 'wastewater';
+        return "Usage: set ".$a[0]." meterChangeDelete <index> <effectiveAt>"
+            unless @a == 4 && $a[2] =~ /^\d+$/
+                && $a[3] =~ /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
+        my $data = cm_coreLoad($hash);
+        return "Unable to load storage" unless $data;
+        my $copy = eval { JSON::PP->new->decode(JSON::PP->new->encode($data)) };
+        return "Unable to copy storage" if $@ || ref($copy) ne 'HASH';
+        my $changes = $copy->{meterChanges};
+        my $index = $a[2];
+        return "Meter change not found"
+            unless ref($changes) eq 'ARRAY' && $index < @$changes
+                && ref($changes->[$index]) eq 'HASH'
+                && ($changes->[$index]{effectiveAt} // '') eq
+                    ($a[3] =~ s/T/ /r);
+        splice @$changes, $index, 1;
+        return "Unable to save storage" unless cm_coreSave($hash, $copy);
         ConsumptionManager_UpdateReadings($hash);
         return undef;
     }
@@ -272,7 +346,7 @@ sub ConsumptionManager_Set($@)
     if ($cmd eq 'meterChangeEdit') {
         return "Meter changes are managed on the water device"
             if ($hash->{MEDIUM} // '') eq 'wastewater';
-        return "Usage: set ".$a[0]." meterChangeEdit <index> <date> <oldCounter> <newCounter> [HH:MM[:SS]] [comment]"
+        return "Usage: set ".$a[0]." meterChangeEdit <index> <date> <oldCounter> <newCounter> <HH:MM[:SS]> [comment]"
             if @a < 6;
         my ($index, $date, $old, $new) = @a[2..5];
         my @tail = @a > 6 ? @a[6..$#a] : ();
@@ -282,6 +356,8 @@ sub ConsumptionManager_Set($@)
             $clock .= ':00' if $clock =~ /^\d{2}:\d{2}$/;
             $effectiveAt = "$date $clock";
         }
+        return "Meter change time is required (HH:MM or HH:MM:SS)"
+            unless defined $effectiveAt;
         my $comment = join(' ', @tail);
         my $data = cm_coreLoad($hash);
         return "Unable to load storage" unless $data;
@@ -317,12 +393,39 @@ sub ConsumptionManager_Set($@)
     # Optional correction for a monthly start counter
     ###############################################################################
 
+    # User-controlled retention protection for any physical snapshot.
+    if ($cmd eq 'counterDelete') {
+        return 'Counter history is managed on the water device'
+            if ($hash->{MEDIUM} // '') eq 'wastewater';
+        return 'Usage: set '.$a[0].' counterDelete <YYYY-MM-DD>'
+            unless @a == 3 && $a[2] =~ /^\d{4}-\d{2}-\d{2}$/;
+        my $data = cm_coreLoad($hash);
+        return 'Unable to load storage' unless $data;
+        my @matches = grep { ref($_) eq 'HASH' && ($_->{date} // '') eq $a[2] }
+            @{ $data->{counterHistory} // [] };
+        return 'Only one manual snapshot can be deleted'
+            unless @matches == 1 && ($matches[0]{source} // '') eq 'manual';
+        $data->{counterHistory} = [
+            grep { !(ref($_) eq 'HASH' && ($_->{date} // '') eq $a[2]) }
+                @{ $data->{counterHistory} }
+        ];
+        return 'Unable to save history' unless cm_coreSave($hash, $data);
+        ConsumptionManager_UpdateReadings($hash);
+        return undef;
+    }
+
     if ($cmd eq "counterBoundary") {
         return "Physical midnight boundaries are managed on the water device"
             if ($hash->{MEDIUM} // '') eq 'wastewater';
         return "Usage: set ".$a[0]." counterBoundary <YYYY-MM-DD> <counter>"
             unless @a == 4;
         my ($date, $counter) = @a[2, 3];
+        my $existingData = cm_coreLoad($hash);
+        return 'Unable to load storage' unless $existingData;
+        my @existing = grep { ref($_) eq 'HASH' && ($_->{date} // '') eq $date }
+            @{ $existingData->{counterHistory} // [] };
+        return 'Automatic snapshots cannot be edited'
+            if @existing && (@existing != 1 || ($existing[0]{source} // '') ne 'manual');
         return "Invalid physical midnight boundary"
             unless defined($date) && $date =~ /^\d{4}-\d{2}-\d{2}$/
                 && defined($counter) && $counter =~ /^\d+(?:\.\d+)?$/;
@@ -339,7 +442,7 @@ sub ConsumptionManager_Set($@)
         return "Meter changes are managed on the water device"
             if ($hash->{MEDIUM} // '') eq 'wastewater';
 
-        return "Usage: set ".$a[0]." meterChange <YYYY-MM-DD> <oldCounter> <newCounter> [HH:MM[:SS]] [comment]"
+        return "Usage: set ".$a[0]." meterChange <YYYY-MM-DD> <oldCounter> <newCounter> <HH:MM[:SS]> [comment]"
             if (@a < 5);
 
         my ($date, $oldCounter, $newCounter) = @a[2, 3, 4];
@@ -350,6 +453,8 @@ sub ConsumptionManager_Set($@)
             $clock .= ':00' if $clock =~ /^\d{2}:\d{2}$/;
             $effectiveAt = "$date $clock";
         }
+        return "Meter change time is required (HH:MM or HH:MM:SS)"
+            unless defined $effectiveAt;
         my $comment = join(" ", @tail);
 
         return "Invalid date"
@@ -840,16 +945,17 @@ sub ConsumptionManager_Get($@)
     # Calendar-year billing
     ###############################################################################
 
-    if ($cmd eq "billing") {
+    if ($cmd eq "billing" || $cmd eq "overview") {
         my $data = cm_coreLoad($hash);
         return "Unable to load storage" unless $data;
         ConsumptionManager_SyncWastewaterBaselines($hash, $data);
-        my $result = cm_billingCalculatePhysicalYear($data);
+        my $billingMonth = AttrVal($hash->{NAME}, 'billingYearStart', '01');
+        my $result = cm_billingCalculatePhysicalBillingYear($data, $billingMonth);
         return "Unable to calculate physical billing" unless ref($result) eq 'HASH';
         return "Physical billing incomplete: " . ($result->{error} // $result->{status} // 'unknown')
             unless ($result->{status} // '') eq 'active';
         my $currency = $data->{settings}{currency} // 'EUR';
-        my $text = "Calendar-year physical billing\n";
+        my $text = "Physical billing year (start month $billingMonth)\n";
         $text .= "==============================\n";
         $text .= sprintf("Period: %s - %s\n", $result->{startDate}, $result->{calculatedTo});
         $text .= sprintf("Meter consumption: %.4f\n", $result->{counterConsumption});
@@ -890,6 +996,13 @@ sub ConsumptionManager_Get($@)
             [ 'Year', "$year-01-01", undef ],
             [ 'Last year', ($year - 1) . '-01-01', "$year-01-01" ],
         );
+        my $billingMonth = AttrVal($hash->{NAME}, 'billingYearStart', '01');
+        $billingMonth = '01' unless $billingMonth =~ /^(?:0[1-9]|1[0-2])$/;
+        my $billingStartYear = $year - (substr($month, 5, 2) < $billingMonth ? 1 : 0);
+        my $billingStart = sprintf('%04d-%s-01', $billingStartYear, $billingMonth);
+        my $previousBillingStart = sprintf('%04d-%s-01', $billingStartYear - 1, $billingMonth);
+        push @periods, [ 'Billing year', $billingStart, undef ],
+            [ 'Last billing year', $previousBillingStart, $billingStart ];
         my $currency = $data->{settings}{currency} // 'EUR';
         my $text = "Physical costs\n==============================\n";
         for my $period (@periods) {
@@ -913,7 +1026,7 @@ sub ConsumptionManager_Get($@)
         return $text;
     }
 
-    return "Unknown argument $cmd, choose one of advance advanceHistory billing cost counterHistory meterChanges tariff tariffHistory";
+    return "Unknown argument $cmd, choose one of advance advanceHistory billing overview cost counterHistory meterChanges tariff tariffHistory";
 }
 
 ###############################################################################
@@ -995,6 +1108,15 @@ sub ConsumptionManager_Attr(@)
     my $hash = $defs{$name};
 
     return undef unless defined $hash;
+
+    if ($attrName eq 'billingYearStart') {
+        if ($cmd eq 'set') {
+            return 'billingYearStart must be 01 through 12'
+                unless defined($attrValue) && $attrValue =~ /^(?:0[1-9]|1[0-2])$/;
+        }
+        ConsumptionManager_UpdateReadings($hash, undef, undef, undef,
+            $cmd eq 'set' ? $attrValue : '01');
+    }
 
     if ($attrName eq 'powerUnit') {
         return "powerUnit is only available for electricity and gas"
@@ -1094,6 +1216,13 @@ sub ConsumptionManager_Notify($$)
                     CommandAttr(undef, "$name currentTimeout $oldValue");
                 }
                 CommandDeleteAttr(undef, "$name powerTimeout");
+            }
+            # At Define time, the linked water device and its attributes may
+            # not be available yet. Refresh derived wastewater readings once
+            # FHEM has completed loading its configuration.
+            if (($hash->{MEDIUM} // '') eq 'wastewater'
+                && !AttrVal($name, 'disable', 0)) {
+                ConsumptionManager_UpdateReadings($hash);
             }
         }
         return undef;
@@ -1346,7 +1475,7 @@ sub ConsumptionManager_DisplayUnit {
 }
 
 sub ConsumptionManager_UpdateReadings {
-    my ($hash, $unitOverride, $powerUnitOverride, $flowUnitOverride) = @_;
+    my ($hash, $unitOverride, $powerUnitOverride, $flowUnitOverride, $billingMonthOverride) = @_;
     my $flowUnit = defined($flowUnitOverride) ? $flowUnitOverride
         : AttrVal($hash->{NAME}, 'flowUnit', 'm3/h');
     my $flowFactor = $flowUnit eq 'l/h' ? 1000 : 1;
@@ -1445,6 +1574,18 @@ sub ConsumptionManager_UpdateReadings {
         [ 'Year',      "$yearKey-01-01",   undef ],
         [ 'LastYear',  $lastYearStart,     "$yearKey-01-01" ],
     );
+    # The billing year begins on the first day of the selected month.
+    # Completed periods use an exclusive end boundary, as the calendar periods do.
+    my $billingMonth = defined($billingMonthOverride) ? $billingMonthOverride
+        : AttrVal($hash->{NAME}, 'billingYearStart', '01');
+    $billingMonth = '01' unless $billingMonth =~ /^(?:0[1-9]|1[0-2])$/;
+    my $currentMonth = substr($monthKey, 5, 2);
+    my $billingStartYear = $yearKey - ($currentMonth < $billingMonth ? 1 : 0);
+    my $billingStart = sprintf('%04d-%s-01', $billingStartYear, $billingMonth);
+    my $previousBillingStart = sprintf('%04d-%s-01', $billingStartYear - 1, $billingMonth);
+    push @periods,
+        [ 'BillingYear', $billingStart, undef ],
+        [ 'LastBillingYear', $previousBillingStart, $billingStart ];
     my %physicalResults;
     for my $period (@periods) {
         my ($label, $start, $end) = @$period;
@@ -1478,7 +1619,7 @@ sub ConsumptionManager_UpdateReadings {
         }
     }
 
-    my $billingResult = cm_billingCalculatePhysicalYear($data);
+    my $billingResult = cm_billingCalculatePhysicalBillingYear($data, $billingMonth);
     if (($hash->{MEDIUM} // '') eq 'wastewater') {
         my $validBilling = ref($billingResult) eq 'HASH'
             && ($billingResult->{status} // '') eq 'active';
@@ -1658,10 +1799,51 @@ sub ConsumptionManager_PruneCounterHistory {
     }
     my $yearLimit = $years ? sprintf('%04d-01-01', $year - $years) : '';
 
-    # Physical consumption and billing require historical midnight boundaries.
-    # Keep all entries until retention can prove that no active tariff or
-    # calculation window still depends on the boundary.
-    return;
+    # Retain daily snapshots only within the configured daily window.
+    # Older month/year opening boundaries are still needed for completed
+    # period calculations; keep those independently of daily retention.
+    # Also retain custom billing-year boundaries and snapshots needed
+    # for tariff boundaries or meter changes, regardless of source.
+    my $billingMonth = AttrVal($hash->{NAME}, 'billingYearStart', '01');
+    $billingMonth = '01' unless $billingMonth =~ /^(?:0[1-9]|1[0-2])$/;
+
+    my %protectedDates;
+    for my $tariff (@{ $data->{tariffs} // [] }) {
+        next unless ref($tariff) eq 'HASH';
+        my $date = $tariff->{validFrom} // '';
+        $protectedDates{$date} = 1 if $date =~ /^\d{4}-\d{2}-\d{2}$/;
+    }
+    for my $change (@{ $data->{meterChanges} // [] }) {
+        next unless ref($change) eq 'HASH';
+        my $date = $change->{date} // '';
+        $protectedDates{$date} = 1 if $date =~ /^\d{4}-\d{2}-\d{2}$/;
+    }
+
+    my @retained = grep {
+        my $entry = $_;
+        if (ref($entry) ne 'HASH') {
+            1; # Never silently discard unrecognized records.
+        }
+        else {
+            my $date = $entry->{date} // substr($entry->{boundary} // '', 0, 10);
+            if ($date !~ /^\d{4}-\d{2}-\d{2}$/) {
+                1;
+            }
+            else {
+                my $isMonth = substr($date, 8, 2) eq '01';
+                my $isYear = substr($date, 5, 5) eq '01-01';
+                my $isBilling = $isMonth && substr($date, 5, 2) eq $billingMonth;
+                my $hasProtectedKind = ref($entry->{kinds}) eq 'ARRAY'
+                    && grep { $_ eq 'tariff' || $_ eq 'meterChange' } @{ $entry->{kinds} };
+                $hasProtectedKind || $protectedDates{$date}
+                    || ($days && $date ge $dayLimit)
+                    || ($months && $isMonth && $date ge $monthLimit)
+                    || ($years && $isYear && $date ge $yearLimit)
+                    || ($years && $isBilling && $date ge $yearLimit);
+            }
+        }
+    } @{ $data->{counterHistory} };
+    $data->{counterHistory} = \@retained;
 }
 
 sub ConsumptionManager_SnapshotTimestamp {
@@ -1702,9 +1884,9 @@ sub ConsumptionManager_SetList {
 
     my ($hash, $unknown) = @_;
 
-    my @commands = ('counter');
-    push @commands, 'counterBoundary', 'meterChange', 'meterChangeEdit',
-        'meterChangeApply'
+    my @commands = ('counter', 'tariffDelete', 'advanceDelete');
+    push @commands, 'counterBoundary', 'counterDelete', 'meterChange', 'meterChangeEdit',
+        'meterChangeApply', 'meterChangeDelete'
         unless (($hash->{MEDIUM} // '') eq 'wastewater');
 
     my $data = cm_coreLoad($hash);
@@ -1966,6 +2148,32 @@ sub ConsumptionManager_FWAdvanceForm {
     return $html;
 }
 
+sub ConsumptionManager_FWCounterForm {
+    my ($hash, $entry) = @_;
+    my $name = ConsumptionManager_FWHtml($hash->{NAME});
+    my $date = ref($entry) eq 'HASH' ? ($entry->{date} // '') : '';
+    my $counter = ref($entry) eq 'HASH' ? ($entry->{counter} // '') : '';
+    my $editing = length($date);
+    my $html = '<form method="get" action="" onsubmit="return cmCounterSubmit(this)">';
+    $html .= '<input type="hidden" name="detail" value="' . $name . '">'
+        . '<input type="hidden" name="cmd" value="">'
+        . '<input type="hidden" class="cmCounterDevice" value="' . $name . '">';
+    $html .= '<input type="hidden" name="fwcsrf" value="'
+        . ConsumptionManager_FWHtml(ConsumptionManager_FWCsrfValue($FW_CSRF)) . '">'
+        if defined $FW_CSRF && length $FW_CSRF;
+    $html .= '<table class="block">'
+        . '<tr><td>Stichtag</td><td><input data-cm-counter-date type="date" required'
+        . ($editing ? ' readonly' : '')
+        . ' value="' . ConsumptionManager_FWHtml($date) . '"></td></tr>'
+        . '<tr><td>Zählerstand</td><td><input data-cm-counter-value type="number"'
+        . ' min="0" step="any" required value="'
+        . ConsumptionManager_FWHtml($counter) . '"></td></tr></table>'
+        . '<button type="submit">Zählerstand speichern</button> '
+        . '<button type="button" onclick="this.closest(\'div\').style.display=\'none\'">Abbrechen</button>'
+        . '</form>';
+    return $html;
+}
+
 sub ConsumptionManager_FWDetail {
     my ($FW_wname, $name, $room, $pageHash) = @_;
     my $hash = $defs{$name};
@@ -1989,7 +2197,11 @@ sub ConsumptionManager_FWDetail {
             $html .= '<td>'.$shown.'</td>';
         }
         $html .= '<td><button type="button" onclick="cmTariffToggle('
-            ."'cmTariffEdit_".$id."'".')">Bearbeiten</button></td></tr>';
+            ."'cmTariffEdit_".$id."'".')">Bearbeiten</button> '
+            . '<button type="button" onclick="cmDatedEntryDelete(\''
+            . ConsumptionManager_FWHtml($name) . '\',\'tariffDelete\','
+            . $id . ',\'' . ConsumptionManager_FWHtml($tariff->{validFrom} // '')
+            . '\')">Löschen</button></td></tr>';
         $html .= '<tr id="cmTariffEdit_'.$id.'" style="display:none"><td colspan="6">'
             .ConsumptionManager_FWForm($hash, $tariff, $id).'</td></tr>';
     }
@@ -2016,6 +2228,13 @@ sub ConsumptionManager_FWDetail {
     }
     $html .= <<'CM_TARIFF_SCRIPT';
 <script>
+function cmDatedEntryDelete(device, command, id, date) {
+    var label = command === 'tariffDelete' ? 'Tarif' : 'Abschlag';
+    if (confirm(label + ' (ID ' + id + ', gültig ab ' + date
+        + ') wirklich löschen? Die Abrechnung wird neu berechnet.')) {
+        cmCounterCommand(device, command + ' ' + id + ' ' + date);
+    }
+}
 function cmTariffToggle(id) {
     var el = document.getElementById(id);
     if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
@@ -2049,7 +2268,11 @@ CM_TARIFF_SCRIPT
             $html .= '<td>'.$value.'</td>';
         }
         $html .= '<td><button type="button" onclick="cmTariffToggle('
-            ."'cmAdvanceEdit_".$id."'".')">Bearbeiten</button></td></tr>';
+            ."'cmAdvanceEdit_".$id."'".')">Bearbeiten</button> '
+            . '<button type="button" onclick="cmDatedEntryDelete(\''
+            . ConsumptionManager_FWHtml($name) . '\',\'advanceDelete\','
+            . $id . ',\'' . ConsumptionManager_FWHtml($advance->{validFrom} // '')
+            . '\')">Löschen</button></td></tr>';
         $html .= '<tr id="cmAdvanceEdit_'.$id.'" style="display:none"><td colspan="6">'
             .ConsumptionManager_FWAdvanceForm($hash, $advance, $id).'</td></tr>';
     }
@@ -2122,8 +2345,17 @@ CM_ADVANCE_SCRIPT
         $html .= '<p>Kein verbundenes Wassergerät verfügbar. '
             . 'Die bisher gespeicherten Werte bleiben unverändert.</p>';
     }
-    $html .= '<table class="block wide"><tr><th>Stichtag</th><th>Zählerstand</th>'
-        . '<th>Abgelesen</th><th>Erfasst</th><th>Quelle</th></tr>';
+    my $canManageHistory = ($hash->{MEDIUM} // '') ne 'wastewater';
+    # Keep FHEMWEB's table theme; only add spacing for the wider action table.
+    $html .= '<style>'
+        . '.consumptionManagerCounters table.cmCounterHistory th,'
+        . '.consumptionManagerCounters table.cmCounterHistory td'
+        . '{padding:3px 12px 3px 6px;vertical-align:middle;white-space:nowrap;}'
+        . '.consumptionManagerCounters .cmCounterHistoryWrap{overflow-x:auto;max-width:100%;}'
+        . '</style>';
+    $html .= '<div class="cmCounterHistoryWrap">';
+    $html .= '<table class="block wide cmCounterHistory"><tr><th>Stichtag</th><th>Zählerstand</th>'
+        . '<th>Abgelesen</th><th>Erfasst</th><th>Quelle</th><th>Aktion</th></tr>';
     my @history = sort {
         ($b->{boundary} // $b->{date} // '') cmp ($a->{boundary} // $a->{date} // '')
     } grep { ref($_) eq 'HASH' } @{
@@ -2131,6 +2363,8 @@ CM_ADVANCE_SCRIPT
             ? $historyData->{counterHistory} : []
     };
     for my $entry (@history) {
+        my $date = $entry->{date} // '';
+        my $manual = ($entry->{source} // '') eq 'manual';
         $html .= '<tr>';
         for my $field ('boundary', 'counter', 'observedAt', 'capturedAt', 'source') {
             my $value = $field eq 'boundary'
@@ -2138,11 +2372,33 @@ CM_ADVANCE_SCRIPT
                 : ($entry->{$field} // '');
             $html .= '<td>' . ConsumptionManager_FWHtml($value) . '</td>';
         }
-        $html .= '</tr>';
+        if ($canManageHistory && $date =~ /^\d{4}-\d{2}-\d{2}$/) {
+            if ($manual) {
+                my $editId = 'cmCounterEdit_' . $date;
+                $html .= '<td><button type="button" onclick="cmTariffToggle(\''
+                    . $editId . '\')">Bearbeiten</button> '
+                    . '<button type="button" onclick="cmCounterDelete(\''
+                    . ConsumptionManager_FWHtml($name) . '\',\''
+                    . ConsumptionManager_FWHtml($date) . '\')">Löschen</button></td></tr>';
+                $html .= '<tr id="' . $editId
+                    . '" style="display:none"><td colspan="6">'
+                    . ConsumptionManager_FWCounterForm($hash, $entry) . '</td></tr>';
+            } else {
+                $html .= '<td>Automatisch</td></tr>';
+            }
+        } else {
+            $html .= '<td>–</td></tr>';
+        }
     }
-    $html .= '<tr><td colspan="5">Noch keine Stichtagswerte vorhanden.</td></tr>'
+    $html .= '<tr><td colspan="6">Noch keine Stichtagswerte vorhanden.</td></tr>'
         unless @history;
-    $html .= '</table>';
+    $html .= '</table></div>';
+    if ($canManageHistory) {
+        $html .= '<p><button type="button" onclick="cmTariffToggle(\'cmCounterNew\')">'
+            . 'Neuen Zählerstand anlegen</button></p>';
+        $html .= '<div id="cmCounterNew" style="display:none">'
+            . ConsumptionManager_FWCounterForm($hash, undef) . '</div>';
+    }
     $html .= '<h4>Zählerwechsel</h4>';
     my @changes = sort {
         ($b->{date} // '') cmp ($a->{date} // '')
@@ -2170,7 +2426,12 @@ CM_ADVANCE_SCRIPT
         if (($hash->{MEDIUM} // '') ne 'wastewater' && $originalIndex >= 0) {
             my $editId = 'cmMeterEdit_' . $originalIndex;
             $html .= '<td><button type="button" onclick="cmTariffToggle(\''
-                . $editId . '\')">Bearbeiten</button></td></tr>';
+                . $editId . '\')">Bearbeiten</button> '
+                . '<button type="button" onclick="cmMeterDelete(\''
+                . ConsumptionManager_FWHtml($name) . '\','
+                . $originalIndex . ',\''
+                . ConsumptionManager_FWHtml(($change->{effectiveAt} // '') =~ s/ /T/r)
+                . '\')">Löschen</button></td></tr>';
             $html .= '<tr id="' . $editId . '" style="display:none"><td colspan="6">';
             $html .= '<form method="get" action="" onsubmit="return cmMeterSubmit(this)">';
             $html .= '<input type="hidden" name="detail" value="'
@@ -2186,7 +2447,7 @@ CM_ADVANCE_SCRIPT
             $html .= '<table class="block">';
             for my $field (
                 ['date', 'Wechseldatum', 'date'],
-                ['effectiveAt', 'Wechselzeit (HH:MM oder HH:MM:SS, optional)', 'text'],
+                ['effectiveAt', 'Wechselzeit (HH:MM oder HH:MM:SS, Pflicht)', 'text'],
                 ['oldCounter', 'Alter Endzählerstand', 'number'],
                 ['newCounter', 'Neuer Anfangszählerstand', 'number'],
                 ['comment', 'Kommentar (optional)', 'text'],
@@ -2199,7 +2460,7 @@ CM_ADVANCE_SCRIPT
                     . ' value="' . ConsumptionManager_FWHtml($key eq 'effectiveAt'
                         ? substr(($change->{effectiveAt} // ''), 11)
                         : ($change->{$key} // '')) . '"'
-                    . ($key ne 'comment' && $key ne 'effectiveAt' ? ' required' : '')
+                    . ($key ne 'comment' ? ' required' : '')
                     . '></td></tr>';
             }
             $html .= '</table><button type="submit">Änderungen speichern</button> '
@@ -2241,7 +2502,7 @@ CM_ADVANCE_SCRIPT
                 . '</td><td><input data-cm-meter-field="' . $key
                 . '" type="' . $type . '"'
                 . ($type eq 'number' ? ' step="any" min="0"' : '')
-                . ($key ne 'comment' && $key ne 'effectiveAt' ? ' required' : '')
+                . ($key ne 'comment' ? ' required' : '')
                 . '></td></tr>';
         }
         $html .= '</table><button type="submit">Zählerwechsel speichern</button> '
@@ -2262,6 +2523,45 @@ function cmMeterNewToggle(id) {
     }
     cmTariffToggle(id);
 }
+function cmCounterSubmit(form) {
+    var device = form.querySelector('.cmCounterDevice').value;
+    var date = form.querySelector('[data-cm-counter-date]').value;
+    var value = form.querySelector('[data-cm-counter-value]').value;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d+(?:\.\d+)?$/.test(value)) {
+        alert('Bitte gültigen Stichtag und Zählerstand eingeben.');
+        return false;
+    }
+    form.elements.cmd.value = 'set ' + device + ' counterBoundary ' + date + ' ' + value;
+    return true;
+}
+function cmCounterCommand(device, command) {
+    var form = document.createElement('form');
+    form.method = 'get';
+    form.action = '';
+    var fields = { detail: device, cmd: 'set ' + device + ' ' + command };
+    var csrf = document.querySelector('.consumptionManagerCounters input[name="fwcsrf"]');
+    if (csrf) fields.fwcsrf = csrf.value;
+    for (var key in fields) {
+        var input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = key;
+        input.value = fields[key];
+        form.appendChild(input);
+    }
+    document.body.appendChild(form);
+    form.submit();
+}
+function cmCounterDelete(device, date) {
+    if (confirm('Manuellen Zählerstand vom ' + date + ' wirklich löschen?')) {
+        cmCounterCommand(device, 'counterDelete ' + date);
+    }
+}
+function cmMeterDelete(device, index, effectiveAt) {
+    if (confirm('Zählerwechsel vom ' + effectiveAt.replace('T', ' ')
+        + ' wirklich löschen?')) {
+        cmCounterCommand(device, 'meterChangeDelete ' + index + ' ' + effectiveAt);
+    }
+}
 function cmMeterSubmit(form) {
     var fields = form.querySelectorAll('[data-cm-meter-field]');
     var values = {};
@@ -2275,14 +2575,14 @@ function cmMeterSubmit(form) {
     var comment = (values.comment || '').replace(/[\r\n]+/g, ' ').trim();
     var editIndex = form.querySelector('.cmMeterIndex');
     var time = (values.effectiveAt || '').trim();
-    if (time && !/^\d{2}:\d{2}(?::\d{2})?$/.test(time)) {
+    if (!/^\d{2}:\d{2}(?::\d{2})?$/.test(time)) {
         alert('Uhrzeit bitte als HH:MM oder HH:MM:SS eingeben.');
         return false;
     }
     form.elements.cmd.value = 'set ' + device
         + (editIndex ? ' meterChangeEdit ' + editIndex.value : ' meterChange')
         + ' ' + values.date + ' ' + values.oldCounter + ' ' + values.newCounter
-        + (time ? ' ' + time : '') + (comment ? ' ' + comment : '');
+        + ' ' + time + (comment ? ' ' + comment : '');
     return true;
 }
 </script>
@@ -2343,10 +2643,12 @@ Anzeigeattribut <code>consumptionUnit</code>.</p>
   physischen Zählerstand manuell übernehmen (nicht für Abwasser).</li>
   <li><code>set &lt;name&gt; counterBoundary &lt;JJJJ-MM-TT&gt; &lt;wert&gt;</code>:
   physischen Zählerstand für eine Tagesgrenze hinterlegen (nicht für Abwasser).</li>
-  <li><code>set &lt;name&gt; meterChange &lt;JJJJ-MM-TT&gt; &lt;alt&gt; &lt;neu&gt; [HH:MM[:SS]] [Kommentar]</code>:
+  <li><code>set &lt;name&gt; meterChange &lt;JJJJ-MM-TT&gt; &lt;alt&gt; &lt;neu&gt; &lt;HH:MM[:SS]&gt; [Kommentar]</code>:
   Zählerwechsel erfassen (nicht für Abwasser).</li>
-  <li><code>set &lt;name&gt; meterChangeEdit &lt;index&gt; &lt;JJJJ-MM-TT&gt; &lt;alt&gt; &lt;neu&gt; [HH:MM[:SS]] [Kommentar]</code>:
+  <li><code>set &lt;name&gt; meterChangeEdit &lt;index&gt; &lt;JJJJ-MM-TT&gt; &lt;alt&gt; &lt;neu&gt; &lt;HH:MM[:SS]&gt; [Kommentar]</code>:
   erfassten Zählerwechsel korrigieren.</li>
+  <li><code>set &lt;name&gt; meterChangeDelete &lt;index&gt; &lt;JJJJ-MM-TTTHH:MM:SS&gt;</code>:
+  erfassten Zählerwechsel nach Bestätigung löschen.</li>
   <li><code>meterChangeApply</code>: technischer Speicherbefehl der
   grafischen Zählerwechselmaske.</li>
   <li><code>tariffCreate</code>, <code>tariffEdit &lt;id&gt;</code>,
@@ -2381,6 +2683,10 @@ stehen auf der Detailseite des Geräts zur Verfügung.</p>
 <h4>GET-Befehle</h4>
 <ul>
   <li><code>get &lt;name&gt; advance</code>: aktuell gültigen Abschlag anzeigen.</li>
+  <li><code>set &lt;name&gt; tariffDelete &lt;id&gt; &lt;JJJJ-MM-TT&gt;</code>:
+  Tarif nach Bestätigung löschen.</li>
+  <li><code>set &lt;name&gt; advanceDelete &lt;id&gt; &lt;JJJJ-MM-TT&gt;</code>:
+  Abschlagszeitraum nach Bestätigung löschen.</li>
   <li><code>get &lt;name&gt; advanceHistory</code>: Abschlagshistorie anzeigen.</li>
   <li><code>get &lt;name&gt; billing</code>: Abrechnung des laufenden Kalenderjahrs ausgeben.</li>
   <li><code>get &lt;name&gt; cost</code>: Kostenübersicht für Verbrauchszeiträume anzeigen.</li>
@@ -2391,32 +2697,42 @@ stehen auf der Detailseite des Geräts zur Verfügung.</p>
 </ul>
 
 <a id="ConsumptionManager_attr"></a>
-<h4>Attribute</h4>
+<h4>Attribute und Standardwerte</h4>
+<p>Die genannten Standardwerte gelten, wenn das jeweilige Attribut nicht gesetzt ist.</p>
 <ul>
-  <li><code>counterDevice</code>: Name des Quellgeräts; bei Abwasser das
-  verknüpfte ConsumptionManager-Wassergerät.</li>
-  <li><code>counterReading</code>: Reading mit dem physischen Zählerstand
-  des Quellgeräts.</li>
-  <li><code>counterMultiplier</code>: positiver Faktor für den eingelesenen
-  Zählerstand, beispielsweise <code>0.001</code> für Wh nach kWh.</li>
-  <li><code>consumptionUnit</code>: rein numerische Anzeigeeinheit. Bei Strom
-  <code>kWh</code> oder <code>Wh</code>, bei Gas, Wasser und Abwasser
-  <code>m3</code> oder <code>l</code>. Beeinflusst die sechs
-  <code>consumption...</code>-Readings und den zugehörigen Durchfluss
-  beziehungsweise die elektrische Momentanleistung.</li>
-  <li><code>flowUnit</code>: bei Gas und Wasser Anzeige des Durchflusses in <code>m3/h</code> oder <code>l/h</code>.</li>
-  <li><code>powerUnit</code>: bei Strom und Gas, unabhängige Anzeige der
-  thermischen Momentanleistung in <code>kW</code> oder <code>W</code>.</li>
-  <li><code>consumptionDecimals</code>: Nachkommastellen für
-  Verbrauchsreadings (0 bis 9). Bei Anzeige in Wh oder Litern werden
-  die Nachkommastellen für die Umrechnung angepasst.</li>
-  <li><code>currentTimeout</code>: Zeit in Sekunden, nach der ein
-  Momentanwert ohne neues Zählerereignis auf null gesetzt wird;
+  <li><code>counterDevice</code>: Quellgerät; kein Standard (muss konfiguriert werden).
+  Bei Abwasser das verknüpfte ConsumptionManager-Wassergerät.</li>
+  <li><code>counterReading</code>: Reading des physischen Zählerstands;
+  kein Standard (bei direkter Zähleranbindung erforderlich).</li>
+  <li><code>counterMultiplier</code>: Faktor für eingelesene Zählerstände;
+  Standard <code>1</code> (keine Umrechnung), z. B. <code>0.001</code> für Wh nach kWh.</li>
+  <li><code>consumptionUnit</code>: Anzeigeeinheit für Verbrauch;
+  Standard bei Strom <code>kWh</code>, sonst <code>m3</code>.
+  Strom: Wh/kWh; Gas, Wasser, Abwasser: m3/l.</li>
+  <li><code>flowUnit</code>: Durchflusseinheit bei Gas und Wasser;
+  Standard <code>m3/h</code>, alternativ <code>l/h</code>.</li>
+  <li><code>powerUnit</code>: Leistungseinheit bei Strom und Gas;
+  Standard <code>kW</code>, alternativ <code>W</code>.</li>
+  <li><code>billingYearStart</code>: Beginn des Abrechnungsjahres;
+  Standard <code>01</code> (Januar), auswählbar <code>01</code> bis <code>12</code>.
+  Der Zeitraum beginnt immer am ersten Tag des gewählten Monats;
+  <code>05</code> entspricht beispielsweise Mai bis April.</li>
+  <li><code>consumptionDecimals</code>: Nachkommastellen der Verbrauchsreadings
+  (0 bis 9). Standard: automatische Ermittlung anhand des Quellreadings,
+  des Multiplikators oder gespeicherter Zählerdaten; falls keine Ermittlung
+  möglich ist, <code>3</code>. Bei Wh/l wird die Anzeigepräzision angepasst.</li>
+  <li><code>currentTimeout</code>: Sekunden bis zum Zurücksetzen des
+  Momentanwerts ohne neues Zählerereignis; Standard <code>300</code> Sekunden,
   <code>0</code> deaktiviert den Timeout.</li>
-  <li><code>dailyHistoryDays</code>, <code>monthlyHistoryMonths</code>,
-  <code>yearlyHistoryYears</code>: Aufbewahrungsdauer der
-  jeweiligen Historien.</li>
-  <li><code>disable</code>: Modul deaktivieren (<code>0</code>/<code>1</code>).</li>
+  <li><code>dailyHistoryDays</code>: Aufbewahrung der Tageshistorie;
+  Standard <code>7</code> Tage, zulässig 0 bis 3650. Ältere tägliche Stichtage werden beim nächsten gespeicherten Tagesstichtag bereinigt, soweit sie nicht für andere Zeiträume geschützt sind.</li>
+  <li><code>monthlyHistoryMonths</code>: Aufbewahrung der Monatshistorie;
+  Standard <code>24</code> Monate, zulässig 0 bis 120. Monatsanfänge bleiben unabhängig von der Tagesfrist erhalten.</li>
+  <li><code>yearlyHistoryYears</code>: Aufbewahrung der Jahreshistorie;
+  Standard <code>10</code> Jahre, zulässig 0 bis 100. Jahres- und konfigurierte Abrechnungsjahresanfänge bleiben geschützt.</li>
+  <li>Die Bereinigung bewahrt zusätzlich manuell erfasste Stichtage, vorhandene Tarifwechselgrenzen und Zählerwechselgrenzen. <code>0</code> bei einem History-Attribut deaktiviert die Aufbewahrung dieser Periodenart, nicht die anderen Schutzregeln.</li>
+  <li><code>disable</code>: Modul deaktivieren; Standard <code>0</code>
+  (aktiv), <code>1</code> deaktiviert.</li>
 </ul>
 <pre>
 attr StromVerbrauch consumptionUnit Wh

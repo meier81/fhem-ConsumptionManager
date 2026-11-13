@@ -6,6 +6,7 @@ use JSON::PP;
 use File::Copy;
 use File::Path qw(make_path);
 use File::Spec;
+use File::Temp qw(tempfile);
 use Exporter 'import';
 
 use ConsumptionManager::Constants qw(
@@ -24,6 +25,7 @@ our @EXPORT_OK = qw(
     cm_storageCreate
     cm_storageLoad
     cm_storageSave
+    cm_storageRename
 );
 
 our $VERSION = CM_VERSION;
@@ -59,6 +61,61 @@ sub cm_storageFilename {
     $storage_dir =~ s{[\\/]+$}{};
 
     return File::Spec->catfile($storage_dir, "ConsumptionManager_${device}.json");
+}
+
+
+# Move a device's JSON and backup together. Never overwrite another device's data.
+# The FHEM RenameFn runs after NAME has been changed.
+sub cm_storageRename {
+    my ($hash, $old_name) = @_;
+    return 'Invalid device reference' unless ref($hash) eq 'HASH';
+    return 'Missing old device name' unless defined $old_name && length $old_name;
+    my $new_name = $hash->{NAME};
+    return 'Missing new device name' unless defined $new_name && length $new_name;
+    return undef if $old_name eq $new_name;
+
+    my %old_hash = %{$hash};
+    $old_hash{NAME} = $old_name;
+    my $old_file = cm_storageFilename(\%old_hash);
+    my $new_file = cm_storageFilename($hash);
+    return 'Invalid storage filename' unless defined $old_file && defined $new_file;
+    return undef if $old_file eq $new_file;
+    return "Storage file for '$old_name' does not exist: $old_file" unless -f $old_file;
+
+    my @moves = ([$old_file, $new_file]);
+    push @moves, ["$old_file.bak", "$new_file.bak"] if -f "$old_file.bak";
+    for my $move (@moves) {
+        return "Destination already exists: $move->[1]" if -e $move->[1];
+    }
+
+    my @completed;
+    for my $move (@moves) {
+        unless (rename($move->[0], $move->[1])) {
+            my $error = "$!";
+            for my $done (reverse @completed) {
+                warn "Unable to roll back storage rename: $!" unless rename($done->[1], $done->[0]);
+            }
+            return "Unable to rename storage '$move->[0]': $error";
+        }
+        push @completed, $move;
+    }
+
+    # Update the embedded device identity while preserving all existing data.
+    my $data = cm_storageLoad($hash);
+    unless ($data) {
+        for my $done (reverse @completed) {
+            warn "Unable to roll back storage rename: $!" unless rename($done->[1], $done->[0]);
+        }
+        return 'Unable to read renamed storage; file move rolled back';
+    }
+    $data->{device}{name} = $new_name;
+    unless (cm_storageSave($hash, $data, { skipBackup => 1 })) {
+        for my $done (reverse @completed) {
+            warn "Unable to roll back storage rename: $!" unless rename($done->[1], $done->[0]);
+        }
+        return 'Unable to update renamed device identity; file move rolled back';
+    }
+    return undef;
 }
 
 sub cm_storageCreate {
@@ -153,52 +210,81 @@ sub cm_storageLoad {
 }
 
 sub cm_storageSave {
-    my ($hash, $data) = @_;
+    my ($hash, $data, $options) = @_;
 
     my $filename = cm_storageFilename($hash);
     return 0 unless defined $filename;
     return 0 unless defined $data && ref $data eq 'HASH';
+    $options ||= {};
+
     $data->{meta} ||= {};
     $data->{meta}{modified} = cm_timestamp();
 
-    my $dir = File::Spec->catpath((File::Spec->splitpath($filename))[0,1]);
-    make_path($dir) unless -d $dir;
-
-    _cm_storageBackup($hash) if -f $filename;
-
-    my $json = JSON::PP->new->pretty->canonical;
-    my $json_text = eval { $json->encode($data) };
+    my $json_text = eval { JSON::PP->new->pretty->canonical->encode($data) };
     if ($@) {
         warn "Unable to encode data to JSON: $@";
         return 0;
     }
 
-    open my $fh, '>:encoding(UTF-8)', $filename
-        or do {
-            warn "Unable to open storage file '$filename' for writing: $!";
-            return 0;
-        };
+    my $dir = File::Spec->catpath((File::Spec->splitpath($filename))[0,1]);
+    eval { make_path($dir) unless -d $dir; 1 } or do {
+        warn "Unable to create storage directory '$dir': $@";
+        return 0;
+    };
 
-    print $fh $json_text;
-    close $fh;
-
-    return 1;
-}
-
-sub _cm_storageBackup {
-    my ($hash) = @_;
-
-    my $filename = cm_storageFilename($hash);
-    return 0 unless defined $filename;
-    return 0 unless -f $filename;
-
-    my $backup_file = "$filename.bak";
-    if (copy($filename, $backup_file)) {
-        return 1;
+    # Write a complete replacement in the same directory before touching
+    # the existing file. A failed write must never truncate the live JSON.
+    my ($fh, $tmp) = eval { tempfile('.cm-write-XXXXXX', DIR => $dir, UNLINK => 0) };
+    unless ($fh && defined $tmp) {
+        warn "Unable to create temporary storage file in '$dir': $!";
+        return 0;
+    }
+    # Preserve permissions of an existing storage file. New files use 0640
+    # (subject to the process umask), rather than tempfile's default 0600.
+    my $mode = 0640;
+    if (-e $filename) {
+        my @stat = stat($filename);
+        $mode = $stat[2] & 07777 if @stat;
+    }
+    unless (chmod($mode, $tmp)) {
+        warn "Unable to set permissions on temporary storage file '$tmp': $!";
+        close($fh);
+        unlink($tmp);
+        return 0;
+    }
+    binmode($fh, ':encoding(UTF-8)');
+    my $written = print {$fh} $json_text;
+    my $closed = close($fh);
+    unless ($written && $closed) {
+        warn "Unable to write temporary storage file '$tmp': $!";
+        unlink($tmp);
+        return 0;
     }
 
-    warn "Unable to create backup file '$backup_file': $!";
-    return 0;
+    # Back up the previous complete JSON without ever truncating the
+    # existing backup. Rename operations preserve their original .bak.
+    if (-f $filename && !$options->{skipBackup}) {
+        my ($bak_fh, $bak_tmp) = eval { tempfile('.cm-backup-XXXXXX', DIR => $dir, UNLINK => 0) };
+        unless ($bak_fh && defined $bak_tmp) {
+            warn "Unable to create temporary backup file in '$dir': $!";
+            unlink($tmp);
+            return 0;
+        }
+        close($bak_fh);
+        unless (copy($filename, $bak_tmp) && rename($bak_tmp, "$filename.bak")) {
+            warn "Unable to update backup '$filename.bak': $!";
+            unlink($bak_tmp);
+            unlink($tmp);
+            return 0;
+        }
+    }
+
+    unless (rename($tmp, $filename)) {
+        warn "Unable to replace storage file '$filename': $!";
+        unlink($tmp);
+        return 0;
+    }
+    return 1;
 }
 
 sub cm_storageValidate {

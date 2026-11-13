@@ -36,6 +36,20 @@ sub _boundary {
     # Explicitly estimated post-restart readings are allowed, with provenance.
     return undef if ($entry->{source} // '') eq 'lastKnownReading'
         && ($entry->{observedAt} // '') ge ($date . ' 00:00:00');
+    # A carried-forward reading is not a valid midnight boundary if a
+    # documented replacement happened after the last actual observation.
+    if (($entry->{boundaryExact} // 0) == 0) {
+        my $observed = $entry->{observedAt} // '';
+        my $boundaryAt = "$date 00:00:00";
+        if ($observed ne '') {
+            for my $change (@{ $data->{meterChanges} // [] }) {
+                next unless ref($change) eq 'HASH';
+                my $at = $change->{effectiveAt} // '';
+                return undef if $at ne '' && $at gt $observed
+                    && $at le $boundaryAt;
+            }
+        }
+    }
     return $entry;
 }
 
@@ -117,9 +131,26 @@ sub cm_counterHistoryCalculateCurrent {
     my $start = _boundary($data, $startDate);
     return undef unless $start;
     my $observed = $data->{meter}{lastUpdate} // '';
-    return undef unless $observed =~ /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/
-        && $observed ge "$startDate 00:00:00";
-    return _calculate($data, "$startDate 00:00:00", $observed,
+    return undef unless $observed =~ /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+    my $boundaryAt = "$startDate 00:00:00";
+    if ($observed lt $boundaryAt) {
+        # A last-known midnight snapshot can be newer than the last actual
+        # observation. Only carry it forward as zero consumption when the
+        # unchanged live counter confirms that same known value.
+        return undef unless 0 + $data->{meter}{current} == 0 + $start->{counter};
+        # No observed sample after the opening boundary: a documented
+        # replacement invalidates the apparent zero-usage assumption.
+        for my $change (@{ $data->{meterChanges} // [] }) {
+            next unless ref($change) eq 'HASH';
+            my $at = $change->{effectiveAt} // '';
+            return undef if $at ne '' && $at gt $observed
+                && $at <= $boundaryAt;
+        }
+        return _calculate($data, $boundaryAt, $boundaryAt,
+            $start->{counter}, $start->{counter},
+            'physicalBoundaryAndStaleReading');
+    }
+    return _calculate($data, $boundaryAt, $observed,
         $start->{counter}, $data->{meter}{current},
         'physicalBoundaryAndLiveReading');
 }
