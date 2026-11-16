@@ -6,7 +6,24 @@ ConsumptionManager ist ein FHEM-Modul zur Berechnung und Verwaltung von Strom-, 
 
 Die Datei `FHEM/98_ConsumptionManager.pm` nach `FHEM/` und alle Dateien aus `lib/ConsumptionManager/` nach `FHEM/lib/ConsumptionManager/` der FHEM-Installation kopieren. Danach FHEM neu starten. Vor einem Update vorhandene FHEM-Konfiguration und ConsumptionManager-Daten sichern.
 
-Dieses Repository enthält bewusst keine FHEM-Control-Datei. Die Installation erfolgt durch Kopieren der Moduldateien, nicht über `update` mit einer Control-Datei.
+## Installation und Updates über FHEM
+
+Das Modul kann über die FHEM-Kommandozeile als zusätzliches Update-Repository eingebunden werden:
+
+```text
+update add https://raw.githubusercontent.com/meier81/fhem-ConsumptionManager/main/controls_ConsumptionManager.txt
+update check
+```
+
+Anschließend kann es über den regulären FHEM-Befehl `update` aktualisiert werden. Für eine einmalige Installation ohne dauerhafte Registrierung:
+
+```text
+update all https://raw.githubusercontent.com/meier81/fhem-ConsumptionManager/main/controls_ConsumptionManager.txt
+```
+
+Vor Installation oder Update die FHEM-Konfiguration und ConsumptionManager-Daten sichern. Nach einer Modulaktualisierung FHEM neu starten.
+
+**Hinweis für Releases:** Bei jeder Änderung an einer verteilten Perl-Datei muss der entsprechende `UPD`-Eintrag in `controls_ConsumptionManager.txt` mit dem neuen Zeitstempel und der exakten Dateigröße aktualisiert werden.
 
 ## Geräte anlegen
 
