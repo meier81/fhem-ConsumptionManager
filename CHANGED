@@ -1,4 +1,14 @@
-2026-11-16 ConsumptionManager 1.1.0: FHEM-Update-Unterstützung mit controls_ConsumptionManager.txt ergänzt.
-2026-11-13 ConsumptionManager 1.1.0: Konfigurierbarer Abrechnungsjahresbeginn (billingYearStart), Abrechnungsjahr-Auswertungen und Zählerstandshistorie mit automatischer Bereinigung.
-2026-11-13 ConsumptionManager 1.1.0: Manuelle Zählerstände in FHEMWEB verwalten; Abwasser-Initialisierung nach FHEM-Neustart verbessert; sichere Speicherung und Geräteumbenennung.
-2026-11-01 ConsumptionManager 1.0.0: Erste stabile Version für Strom, Gas, Wasser und Abwasser mit Tarif-, Abschlags- und Zählerwechselverwaltung.
+ConsumptionManager - Änderungen
+
+2026-11-16 - Version 1.1.0
+- FHEM-Update-Unterstützung hinzugefügt
+- Abrechnungsjahresbeginn frei wählbar
+- Manuelle Zählerstände verwalten
+- Automatische Bereinigung der Zählerhistorie
+- Abwasser-Initialisierung verbessert
+- Datenspeicherung und Umbenennung verbessert
+
+2026-11-01 - Version 1.0.0
+- Erste stabile Version
+- Strom, Gas, Wasser und Abwasser
+- Tarife, Abschläge und Zählerwechsel
