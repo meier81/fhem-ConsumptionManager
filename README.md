@@ -34,3 +34,7 @@ Weitere Änderungen siehe [CHANGELOG.md](CHANGELOG.md).
 ## Version 1.1.0: Abrechnungsjahr und Datenspeicherung
 
 Mit `attr <Device> billingYearStart 05` beginnt das Abrechnungsjahr am 1. Mai und endet am 30. April des Folgejahres. Erlaubt sind die Monatswerte `01` bis `12`; ohne Attribut gilt `01`. Die Kalenderjahr-Readings bleiben erhalten. Ergänzt werden `consumptionBillingYear`, `consumptionLastBillingYear`, `costBillingYear` und `costLastBillingYear`. `get overview` und `get billing` verwenden den gewählten Abrechnungsbeginn; `get cost` zeigt beide Abrechnungsjahre. Geräteumbenennungen übernehmen die JSON-Datei und ihre Sicherung. Die Speicherung erfolgt über eine temporäre Datei; bestehende Dateiberechtigungen bleiben erhalten.
+
+## Lizenz
+
+Copyright (c) 2026 Markus Maywald. Dieses Projekt steht unter der MIT-Lizenz. Siehe [LICENSE](LICENSE) für den vollständigen Lizenztext.
